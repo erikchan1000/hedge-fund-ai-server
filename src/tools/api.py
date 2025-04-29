@@ -2,6 +2,9 @@ import datetime
 import os
 import pandas as pd
 import requests
+import time
+import logging
+from typing import Optional
 
 from data.cache import get_cache
 from data.models import (
@@ -17,10 +20,33 @@ from data.models import (
     InsiderTradeResponse,
     CompanyFactsResponse,
 )
+from utils.llm import APIRateLimiter
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # Global cache instance
 _cache = get_cache()
 
+# Get the shared rate limiter instance
+rate_limiter = APIRateLimiter("financial")
+
+def _make_api_request(url: str, headers: dict) -> requests.Response:
+    """Make an API request with rate limiting."""
+    # Use the shared rate limiter
+    rate_limiter.wait_for_rate_limit()
+    
+    response = requests.get(url, headers=headers)
+    
+    # If we get rate limited, wait and retry
+    if response.status_code == 429:
+        retry_after = int(response.headers.get('Retry-After', 15))
+        logger.warning(f"Rate limited. Waiting {retry_after} seconds before retrying...")
+        time.sleep(retry_after)
+        return requests.get(url, headers=headers)
+    
+    return response
 
 def get_prices(ticker: str, start_date: str, end_date: str) -> list[Price]:
     """Fetch price data from cache or API."""
@@ -37,7 +63,7 @@ def get_prices(ticker: str, start_date: str, end_date: str) -> list[Price]:
         headers["X-API-KEY"] = api_key
 
     url = f"https://api.financialdatasets.ai/prices/?ticker={ticker}&interval=day&interval_multiplier=1&start_date={start_date}&end_date={end_date}"
-    response = requests.get(url, headers=headers)
+    response = _make_api_request(url, headers)
     if response.status_code != 200:
         raise Exception(f"Error fetching data: {ticker} - {response.status_code} - {response.text}")
 
@@ -74,7 +100,7 @@ def get_financial_metrics(
         headers["X-API-KEY"] = api_key
 
     url = f"https://api.financialdatasets.ai/financial-metrics/?ticker={ticker}&report_period_lte={end_date}&limit={limit}&period={period}"
-    response = requests.get(url, headers=headers)
+    response = _make_api_request(url, headers)
     if response.status_code != 200:
         raise Exception(f"Error fetching data: {ticker} - {response.status_code} - {response.text}")
 
@@ -157,7 +183,7 @@ def get_insider_trades(
             url += f"&filing_date_gte={start_date}"
         url += f"&limit={limit}"
         
-        response = requests.get(url, headers=headers)
+        response = _make_api_request(url, headers)
         if response.status_code != 200:
             raise Exception(f"Error fetching data: {ticker} - {response.status_code} - {response.text}")
         
@@ -220,7 +246,7 @@ def get_company_news(
             url += f"&start_date={start_date}"
         url += f"&limit={limit}"
         
-        response = requests.get(url, headers=headers)
+        response = _make_api_request(url, headers)
         if response.status_code != 200:
             raise Exception(f"Error fetching data: {ticker} - {response.status_code} - {response.text}")
         
@@ -265,7 +291,7 @@ def get_market_cap(
             headers["X-API-KEY"] = api_key
             
         url = f"https://api.financialdatasets.ai/company/facts/?ticker={ticker}"
-        response = requests.get(url, headers=headers)
+        response = _make_api_request(url, headers)
         if response.status_code != 200:
             print(f"Error fetching company facts: {ticker} - {response.status_code}")
             return None

@@ -1,8 +1,14 @@
 from datetime import datetime, timedelta
-from typing import Dict, Any, List
-from main import run_hedge_fund
+from typing import Dict, Any, List, Generator
+from main import run_hedge_fund, create_workflow
 from ..models.portfolio import Portfolio
 from ..models.analysis import AnalysisRequest
+import time
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 def validate_date(date_str: str) -> bool:
     """Validate if a string is in YYYY-MM-DD format."""
@@ -12,9 +18,10 @@ def validate_date(date_str: str) -> bool:
     except ValueError:
         return False
 
-def process_analysis_request(request_data: AnalysisRequest) -> Dict[str, Any]:
-    """Process the analysis request and return the results."""
+def process_analysis_request(request_data: AnalysisRequest) -> Generator[Dict[str, Any], None, None]:
+    """Process the analysis request and yield results incrementally."""
     tickers: List[str] = request_data.tickers
+    app = create_workflow().compile()
     
     # Handle dates
     end_date: str = request_data.end_date or datetime.now().strftime('%Y-%m-%d')
@@ -50,16 +57,16 @@ def process_analysis_request(request_data: AnalysisRequest) -> Dict[str, Any]:
         }
     }
     
-    # Run the hedge fund analysis
-    result: Dict[str, Any] = run_hedge_fund(
+    # Run the hedge fund analysis and yield results as they come
+    for result in run_hedge_fund(
         tickers=tickers,
         start_date=start_date,
         end_date=end_date,
         portfolio=portfolio_dict,
+        app=app,
         show_reasoning=request_data.show_reasoning,
-        selected_analysts=request_data.selected_analysts,
+        selected_analysts=request_data.selected_analysts if request_data.selected_analysts else [],
         model_name=request_data.model_name,
         model_provider=request_data.model_provider,
-    )
-    
-    return result 
+    ):
+        yield result

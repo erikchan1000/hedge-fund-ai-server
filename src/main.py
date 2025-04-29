@@ -1,4 +1,6 @@
 import sys
+import logging
+from typing import Generator, Dict, Any
 
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage
@@ -19,6 +21,10 @@ from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from utils.visualize import save_graph_as_png
 import json
+
+# Configure logging
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -47,51 +53,127 @@ def run_hedge_fund(
     start_date: str,
     end_date: str,
     portfolio: dict,
+    app,
     show_reasoning: bool = False,
     selected_analysts: list[str] = [],
     model_name: str = "gpt-4o",
     model_provider: str = "OpenAI",
-):
+) -> Generator[Dict[str, Any], None, None]:
+    """Run the hedge fund analysis and yield progress updates."""
+    logger.debug("Starting hedge fund analysis")
     # Start progress tracking
     progress.start()
-
+    
     try:
         # Create a new workflow if analysts are customized
         if selected_analysts:
+            logger.debug(f"Creating workflow with analysts: {selected_analysts}")
             workflow = create_workflow(selected_analysts)
             agent = workflow.compile()
         else:
+            logger.debug("Using provided app as agent")
             agent = app
 
-        final_state = agent.invoke(
-            {
-                "messages": [
-                    HumanMessage(
-                        content="Make trading decisions based on the provided data.",
-                    )
-                ],
-                "data": {
-                    "tickers": tickers,
-                    "portfolio": portfolio,
-                    "start_date": start_date,
-                    "end_date": end_date,
-                    "analyst_signals": {},
-                },
-                "metadata": {
-                    "show_reasoning": show_reasoning,
-                    "model_name": model_name,
-                    "model_provider": model_provider,
-                },
-            },
-        )
+        # Yield initial progress
+        yield {
+            "type": "progress",
+            "stage": "initialization",
+            "message": "Starting analysis...",
+            "progress": 0,
+            "analysts": selected_analysts,
+            "tickers": tickers
+        }
 
-        return {
-            "decisions": parse_hedge_fund_response(final_state["messages"][-1].content),
-            "analyst_signals": final_state["data"]["analyst_signals"],
+        # Initialize state
+        state = {
+            "messages": [
+                HumanMessage(
+                    content="Make trading decisions based on the provided data.",
+                )
+            ],
+            "data": {
+                "tickers": tickers,
+                "portfolio": portfolio,
+                "start_date": start_date,
+                "end_date": end_date,
+                "analyst_signals": {},
+            },
+            "metadata": {
+                "show_reasoning": show_reasoning,
+                "model_name": model_name,
+                "model_provider": model_provider,
+            },
+        }
+
+        # Yield progress for each analyst
+        for i, analyst in enumerate(selected_analysts):
+            logger.debug(f"Running {analyst} analysis")
+            yield {
+                "type": "progress",
+                "stage": "analysis",
+                "message": f"Running {analyst} analysis...",
+                "progress": int(20 + (i * 20 / len(selected_analysts))),
+                "current_analyst": analyst,
+                "analyst_progress": f"{i + 1}/{len(selected_analysts)}"
+            }
+            # Run the analyst
+            state = agent.invoke(state)
+            yield {
+                "type": "progress",
+                "stage": "analysis",
+                "message": f"Completed {analyst} analysis",
+                "progress": int(40 + (i * 20 / len(selected_analysts))),
+                "current_analyst": analyst,
+                "analyst_progress": f"{i + 1}/{len(selected_analysts)}"
+            }
+
+        # Run risk management
+        logger.debug("Running risk management")
+        yield {
+            "type": "progress",
+            "stage": "risk_management",
+            "message": "Running risk management...",
+            "progress": 60
+        }
+        state = agent.invoke(state)
+        yield {
+            "type": "progress",
+            "stage": "risk_management",
+            "message": "Completed risk management",
+            "progress": 80
+        }
+
+        # Run portfolio management
+        logger.debug("Running portfolio management")
+        yield {
+            "type": "progress",
+            "stage": "portfolio_management",
+            "message": "Running portfolio management...",
+            "progress": 90
+        }
+        state = agent.invoke(state)
+        
+        # Yield final results
+        logger.debug("Yielding final results")
+        yield {
+            "type": "result",
+            "data": {
+                "decisions": parse_hedge_fund_response(state["messages"][-1].content),
+                "analyst_signals": state["data"]["analyst_signals"],
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"Error in hedge fund analysis: {str(e)}", exc_info=True)
+        yield {
+            "type": "error",
+            "message": str(e),
+            "stage": "error"
         }
     finally:
         # Stop progress tracking
         progress.stop()
+        logger.debug("Analysis completed")
 
 
 def start(state: AgentState):
@@ -300,6 +382,7 @@ if __name__ == "__main__":
         start_date=start_date,
         end_date=end_date,
         portfolio=portfolio,
+        app=app,
         show_reasoning=args.show_reasoning,
         selected_analysts=selected_analysts,
         model_name=model_choice,
