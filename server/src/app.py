@@ -1,5 +1,4 @@
 from flask import Flask
-from flask_cors import CORS
 from api import init_app
 import os
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -7,7 +6,6 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 def create_app() -> Flask:
     """Create and configure the Flask application."""
     app = Flask(__name__)
-    CORS(app)  # Enable CORS for all routes
     
     # Add security headers
     @app.after_request
