@@ -1,10 +1,9 @@
 import datetime
 import os
 import pandas as pd
-import requests
-import time
 import logging
-from typing import Optional
+from typing import Optional, List
+from datetime import datetime, timedelta
 
 from data.cache import get_cache
 from data.models import (
@@ -20,7 +19,8 @@ from data.models import (
     InsiderTradeResponse,
     CompanyFactsResponse,
 )
-from utils.llm import APIRateLimiter
+from .finnhub_client import FinnHubClient
+from .alpaca_client import AlpacaClient
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -29,27 +29,12 @@ logger = logging.getLogger(__name__)
 # Global cache instance
 _cache = get_cache()
 
-# Get the shared rate limiter instance
-rate_limiter = APIRateLimiter("financial")
+# Initialize clients
+finnhub_client = FinnHubClient()
+alpaca_client = AlpacaClient()
 
-def _make_api_request(url: str, headers: dict) -> requests.Response:
-    """Make an API request with rate limiting."""
-    # Use the shared rate limiter
-    rate_limiter.wait_for_rate_limit()
-    
-    response = requests.get(url, headers=headers)
-    
-    # If we get rate limited, wait and retry
-    if response.status_code == 429:
-        retry_after = int(response.headers.get('Retry-After', 15))
-        logger.warning(f"Rate limited. Waiting {retry_after} seconds before retrying...")
-        time.sleep(retry_after)
-        return requests.get(url, headers=headers)
-    
-    return response
-
-def get_prices(ticker: str, start_date: str, end_date: str) -> list[Price]:
-    """Fetch price data from cache or API."""
+def get_prices(ticker: str, start_date: str, end_date: str) -> List[Price]:
+    """Fetch price data from cache or Alpaca API."""
     # Check cache first
     if cached_data := _cache.get_prices(ticker):
         # Filter cached data by date range and convert to Price objects
@@ -57,174 +42,143 @@ def get_prices(ticker: str, start_date: str, end_date: str) -> list[Price]:
         if filtered_data:
             return filtered_data
 
-    # If not in cache or no data in range, fetch from API
-    headers = {}
-    if api_key := os.environ.get("FINANCIAL_DATASETS_API_KEY"):
-        headers["X-API-KEY"] = api_key
+    try:
+        # Fetch from Alpaca
+        data = alpaca_client.get_stock_price(ticker, start_date, end_date)
+        
+        if data["s"] != "ok":
+            raise Exception(f"Error fetching data: {ticker} - {data['s']}")
 
-    url = f"https://api.financialdatasets.ai/prices/?ticker={ticker}&interval=day&interval_multiplier=1&start_date={start_date}&end_date={end_date}"
-    response = _make_api_request(url, headers)
-    if response.status_code != 200:
-        raise Exception(f"Error fetching data: {ticker} - {response.status_code} - {response.text}")
+        # Convert to our Price model
+        prices = []
+        for i in range(len(data["t"])):
+            prices.append(Price(
+                time=datetime.fromtimestamp(data["t"][i]).strftime("%Y-%m-%d"),
+                open=data["o"][i],
+                high=data["h"][i],
+                low=data["l"][i],
+                close=data["c"][i],
+                volume=data["v"][i]
+            ))
 
-    # Parse response with Pydantic model
-    price_response = PriceResponse(**response.json())
-    prices = price_response.prices
+        if not prices:
+            return []
 
-    if not prices:
-        return []
+        # Cache the results
+        _cache.set_prices(ticker, [p.model_dump() for p in prices])
+        return prices
 
-    # Cache the results as dicts
-    _cache.set_prices(ticker, [p.model_dump() for p in prices])
-    return prices
-
+    except Exception as e:
+        logger.error(f"Error fetching prices for {ticker}: {str(e)}")
+        raise
 
 def get_financial_metrics(
     ticker: str,
     end_date: str,
     period: str = "ttm",
     limit: int = 10,
-) -> list[FinancialMetrics]:
-    """Fetch financial metrics from cache or API."""
+) -> List[FinancialMetrics]:
+    """Fetch financial metrics from cache or FinnHub API."""
     # Check cache first
     if cached_data := _cache.get_financial_metrics(ticker):
-        # Filter cached data by date and limit
-        filtered_data = [FinancialMetrics(**metric) for metric in cached_data if metric["report_period"] <= end_date]
+        filtered_data = [FinancialMetrics(**metric) for metric in cached_data 
+                        if metric["report_period"] <= end_date]
         filtered_data.sort(key=lambda x: x.report_period, reverse=True)
         if filtered_data:
             return filtered_data[:limit]
 
-    # If not in cache or insufficient data, fetch from API
-    headers = {}
-    if api_key := os.environ.get("FINANCIAL_DATASETS_API_KEY"):
-        headers["X-API-KEY"] = api_key
+    try:
+        # Get company profile for basic metrics
+        profile = finnhub_client.get_company_profile(ticker)
+        
+        # Get financial statements
+        income = finnhub_client.get_financial_statements(ticker, "income")
+        balance = finnhub_client.get_financial_statements(ticker, "balance")
+        cash_flow = finnhub_client.get_financial_statements(ticker, "cash")
+        
+        # Convert to our FinancialMetrics model
+        metrics = FinancialMetrics(
+            report_period=end_date,
+            market_cap=profile.get("marketCapitalization"),
+            pe_ratio=profile.get("pe"),
+            pb_ratio=profile.get("pb"),
+            ps_ratio=profile.get("ps"),
+            # Add more metrics as needed
+        )
 
-    url = f"https://api.financialdatasets.ai/financial-metrics/?ticker={ticker}&report_period_lte={end_date}&limit={limit}&period={period}"
-    response = _make_api_request(url, headers)
-    if response.status_code != 200:
-        raise Exception(f"Error fetching data: {ticker} - {response.status_code} - {response.text}")
+        # Cache the results
+        _cache.set_financial_metrics(ticker, [metrics.model_dump()])
+        return [metrics]
 
-    # Parse response with Pydantic model
-    metrics_response = FinancialMetricsResponse(**response.json())
-    # Return the FinancialMetrics objects directly instead of converting to dict
-    financial_metrics = metrics_response.financial_metrics
-
-    if not financial_metrics:
-        return []
-
-    # Cache the results as dicts
-    _cache.set_financial_metrics(ticker, [m.model_dump() for m in financial_metrics])
-    return financial_metrics
-
-
-def search_line_items(
-    ticker: str,
-    line_items: list[str],
-    end_date: str,
-    period: str = "ttm",
-    limit: int = 10,
-) -> list[LineItem]:
-    """Fetch line items from API."""
-    # If not in cache or insufficient data, fetch from API
-    headers = {}
-    if api_key := os.environ.get("FINANCIAL_DATASETS_API_KEY"):
-        headers["X-API-KEY"] = api_key
-
-    url = "https://api.financialdatasets.ai/financials/search/line-items"
-
-    body = {
-        "tickers": [ticker],
-        "line_items": line_items,
-        "end_date": end_date,
-        "period": period,
-        "limit": limit,
-    }
-    response = requests.post(url, headers=headers, json=body)
-    if response.status_code != 200:
-        raise Exception(f"Error fetching data: {ticker} - {response.status_code} - {response.text}")
-    data = response.json()
-    response_model = LineItemResponse(**data)
-    search_results = response_model.search_results
-    if not search_results:
-        return []
-
-    # Cache the results
-    return search_results[:limit]
-
+    except Exception as e:
+        logger.error(f"Error fetching financial metrics for {ticker}: {str(e)}")
+        raise
 
 def get_insider_trades(
     ticker: str,
     end_date: str,
-    start_date: str | None = None,
+    start_date: Optional[str] = None,
     limit: int = 1000,
-) -> list[InsiderTrade]:
-    """Fetch insider trades from cache or API."""
+) -> List[InsiderTrade]:
+    """Fetch insider trades from cache or FinnHub API."""
     # Check cache first
     if cached_data := _cache.get_insider_trades(ticker):
-        # Filter cached data by date range
         filtered_data = [InsiderTrade(**trade) for trade in cached_data 
-                        if (start_date is None or (trade.get("transaction_date") or trade["filing_date"]) >= start_date)
-                        and (trade.get("transaction_date") or trade["filing_date"]) <= end_date]
-        filtered_data.sort(key=lambda x: x.transaction_date or x.filing_date, reverse=True)
+                        if (start_date is None or trade["transaction_date"] >= start_date)
+                        and trade["transaction_date"] <= end_date]
+        filtered_data.sort(key=lambda x: x.transaction_date, reverse=True)
         if filtered_data:
             return filtered_data
 
-    # If not in cache or insufficient data, fetch from API
-    headers = {}
-    if api_key := os.environ.get("FINANCIAL_DATASETS_API_KEY"):
-        headers["X-API-KEY"] = api_key
-
-    all_trades = []
-    current_end_date = end_date
-    
-    while True:
-        url = f"https://api.financialdatasets.ai/insider-trades/?ticker={ticker}&filing_date_lte={current_end_date}"
-        if start_date:
-            url += f"&filing_date_gte={start_date}"
-        url += f"&limit={limit}"
+    try:
+        # Fetch from FinnHub
+        data = finnhub_client.get_insider_transactions(ticker)
         
-        response = _make_api_request(url, headers)
-        if response.status_code != 200:
-            raise Exception(f"Error fetching data: {ticker} - {response.status_code} - {response.text}")
-        
-        data = response.json()
-        response_model = InsiderTradeResponse(**data)
-        insider_trades = response_model.insider_trades
-        
-        if not insider_trades:
-            break
+        # Convert to our InsiderTrade model
+        trades = []
+        for trade in data.get("data", []):
+            # Map FinnHub fields to our model
+            transaction_type = "buy" if trade.get("change") > 0 else "sell"
+            shares = abs(trade.get("change", 0))
+            price_per_share = trade.get("price", 0)
+            total_value = shares * price_per_share
             
-        all_trades.extend(insider_trades)
-        
-        # Only continue pagination if we have a start_date and got a full page
-        if not start_date or len(insider_trades) < limit:
-            break
-            
-        # Update end_date to the oldest filing date from current batch for next iteration
-        current_end_date = min(trade.filing_date for trade in insider_trades).split('T')[0]
-        
-        # If we've reached or passed the start_date, we can stop
-        if current_end_date <= start_date:
-            break
+            trades.append(InsiderTrade(
+                ticker=ticker,
+                issuer=ticker,  # Using ticker as issuer since FinnHub doesn't provide this
+                name=trade.get("name", ""),
+                title=trade.get("title", ""),
+                is_board_director=None,  # FinnHub doesn't provide this information
+                transaction_date=trade.get("transactionDate", ""),
+                transaction_shares=shares,
+                transaction_price_per_share=price_per_share,
+                transaction_value=total_value,
+                shares_owned_before_transaction=None,  # FinnHub doesn't provide this
+                shares_owned_after_transaction=None,  # FinnHub doesn't provide this
+                security_title="Common Stock",  # Default to common stock since FinnHub doesn't provide this
+                filing_date=trade.get("filingDate", "")
+            ))
 
-    if not all_trades:
-        return []
+        if not trades:
+            return []
 
-    # Cache the results
-    _cache.set_insider_trades(ticker, [trade.model_dump() for trade in all_trades])
-    return all_trades
+        # Cache the results
+        _cache.set_insider_trades(ticker, [trade.model_dump() for trade in trades])
+        return trades
 
+    except Exception as e:
+        logger.error(f"Error fetching insider trades for {ticker}: {str(e)}")
+        raise
 
 def get_company_news(
     ticker: str,
     end_date: str,
-    start_date: str | None = None,
+    start_date: Optional[str] = None,
     limit: int = 1000,
-) -> list[CompanyNews]:
-    """Fetch company news from cache or API."""
+) -> List[CompanyNews]:
+    """Fetch company news from cache or FinnHub API."""
     # Check cache first
     if cached_data := _cache.get_company_news(ticker):
-        # Filter cached data by date range
         filtered_data = [CompanyNews(**news) for news in cached_data 
                         if (start_date is None or news["date"] >= start_date)
                         and news["date"] <= end_date]
@@ -232,87 +186,48 @@ def get_company_news(
         if filtered_data:
             return filtered_data
 
-    # If not in cache or insufficient data, fetch from API
-    headers = {}
-    if api_key := os.environ.get("FINANCIAL_DATASETS_API_KEY"):
-        headers["X-API-KEY"] = api_key
-
-    all_news = []
-    current_end_date = end_date
-    
-    while True:
-        url = f"https://api.financialdatasets.ai/news/?ticker={ticker}&end_date={current_end_date}"
-        if start_date:
-            url += f"&start_date={start_date}"
-        url += f"&limit={limit}"
+    try:
+        # Fetch from FinnHub
+        data = finnhub_client.get_company_news(ticker, start_date or "2020-01-01", end_date)
         
-        response = _make_api_request(url, headers)
-        if response.status_code != 200:
-            raise Exception(f"Error fetching data: {ticker} - {response.status_code} - {response.text}")
-        
-        data = response.json()
-        response_model = CompanyNewsResponse(**data)
-        company_news = response_model.news
-        
-        if not company_news:
-            break
+        # Convert to our CompanyNews model
+        news_items = []
+        for item in data:
+            # Convert timestamp to date string
+            date = datetime.fromtimestamp(item.get("datetime", 0)).strftime("%Y-%m-%d")
             
-        all_news.extend(company_news)
-        
-        # Only continue pagination if we have a start_date and got a full page
-        if not start_date or len(company_news) < limit:
-            break
-            
-        # Update end_date to the oldest date from current batch for next iteration
-        current_end_date = min(news.date for news in company_news).split('T')[0]
-        
-        # If we've reached or passed the start_date, we can stop
-        if current_end_date <= start_date:
-            break
+            news_items.append(CompanyNews(
+                ticker=ticker,
+                title=item.get("headline", ""),
+                author="",  # FinnHub doesn't provide author information
+                source=item.get("source", ""),
+                date=date,
+                url=item.get("url", ""),
+                sentiment=str(item.get("sentiment", 0))  # Convert to string as required by model
+            ))
 
-    if not all_news:
-        return []
+        if not news_items:
+            return []
 
-    # Cache the results
-    _cache.set_company_news(ticker, [news.model_dump() for news in all_news])
-    return all_news
+        # Cache the results
+        _cache.set_company_news(ticker, [news.model_dump() for news in news_items])
+        return news_items
 
+    except Exception as e:
+        logger.error(f"Error fetching company news for {ticker}: {str(e)}")
+        raise
 
-def get_market_cap(
-    ticker: str,
-    end_date: str,
-) -> float | None:
-    """Fetch market cap from the API."""
-    # Check if end_date is today
-    if end_date == datetime.datetime.now().strftime("%Y-%m-%d"):
-        # Get the market cap from company facts API
-        headers = {}
-        if api_key := os.environ.get("FINANCIAL_DATASETS_API_KEY"):
-            headers["X-API-KEY"] = api_key
-            
-        url = f"https://api.financialdatasets.ai/company/facts/?ticker={ticker}"
-        response = _make_api_request(url, headers)
-        if response.status_code != 200:
-            print(f"Error fetching company facts: {ticker} - {response.status_code}")
-            return None
-            
-        data = response.json()
-        response_model = CompanyFactsResponse(**data)
-        return response_model.company_facts.market_cap
-
-    financial_metrics = get_financial_metrics(ticker, end_date)
-    if not financial_metrics:
-        return None
-    
-    market_cap = financial_metrics[0].market_cap
-
-    if not market_cap:
+def get_market_cap(ticker: str, end_date: str) -> Optional[float]:
+    """Fetch market cap from FinnHub API."""
+    try:
+        # Get quote data which includes market cap
+        quote = finnhub_client.get_quote(ticker)
+        return quote.get("marketCap")
+    except Exception as e:
+        logger.error(f"Error fetching market cap for {ticker}: {str(e)}")
         return None
 
-    return market_cap
-
-
-def prices_to_df(prices: list[Price]) -> pd.DataFrame:
+def prices_to_df(prices: List[Price]) -> pd.DataFrame:
     """Convert prices to a DataFrame."""
     df = pd.DataFrame([p.model_dump() for p in prices])
     df["Date"] = pd.to_datetime(df["time"])
@@ -323,8 +238,95 @@ def prices_to_df(prices: list[Price]) -> pd.DataFrame:
     df.sort_index(inplace=True)
     return df
 
-
-# Update the get_price_data function to use the new functions
 def get_price_data(ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
+    """Get price data as DataFrame."""
     prices = get_prices(ticker, start_date, end_date)
     return prices_to_df(prices)
+
+def search_line_items(ticker: str, line_items: List[str], end_date: str) -> List[LineItem]:
+    """Fetch specific financial line items from FinnHub API."""
+    try:
+        # Get financial statements from FinnHub
+        income = finnhub_client.get_financial_statements(ticker, "income")
+        balance = finnhub_client.get_financial_statements(ticker, "balance")
+        cash_flow = finnhub_client.get_financial_statements(ticker, "cash")
+        
+        # Map line items to FinnHub fields
+        line_item_map = {
+            "earnings_per_share": "basicEps",
+            "revenue": "totalRevenue",
+            "net_income": "netIncome",
+            "book_value_per_share": "bookValuePerShare",
+            "total_assets": "totalAssets",
+            "total_liabilities": "totalLiabilities",
+            "current_assets": "totalCurrentAssets",
+            "current_liabilities": "totalCurrentLiabilities",
+            "dividends_and_other_cash": "dividendsPaid",
+            "operating_cash_flow": "operatingCashFlow",
+            "free_cash_flow": "freeCashFlow",
+            "gross_profit": "grossProfit",
+            "operating_income": "operatingIncome",
+            "interest_expense": "interestExpense",
+            "depreciation_and_amortization": "depreciationAndAmortization",
+            "research_and_development": "researchAndDevelopment",
+            "selling_general_and_administrative": "sellingGeneralAndAdministrative",
+            "total_debt": "totalDebt",
+            "cash_and_equivalents": "cashAndCashEquivalents",
+            "inventory": "inventory",
+            "accounts_receivable": "netReceivables",
+            "accounts_payable": "accountsPayable",
+            "long_term_debt": "longTermDebt",
+            "short_term_debt": "shortTermDebt",
+            "capital_expenditures": "capitalExpenditure",
+            "net_cash_flow": "netCashFlow",
+            "net_cash_flow_from_operating_activities": "netCashFlowFromOperatingActivities",
+            "net_cash_flow_from_investing_activities": "netCashFlowFromInvestingActivities",
+            "net_cash_flow_from_financing_activities": "netCashFlowFromFinancingActivities",
+            "net_cash_flow_from_discontinued_operations": "netCashFlowFromDiscontinuedOperations",
+            "net_cash_flow_from_continuing_operations": "netCashFlowFromContinuingOperations",
+            "net_cash_flow_from_operating_activities_continuing_operations": "netCashFlowFromOperatingActivitiesContinuingOperations",
+            "net_cash_flow_from_investing_activities_continuing_operations": "netCashFlowFromInvestingActivitiesContinuingOperations",
+            "net_cash_flow_from_financing_activities_continuing_operations": "netCashFlowFromFinancingActivitiesContinuingOperations",
+            "net_cash_flow_from_discontinued_operations_continuing_operations": "netCashFlowFromDiscontinuedOperationsContinuingOperations",
+            "net_cash_flow_from_continuing_operations_continuing_operations": "netCashFlowFromContinuingOperationsContinuingOperations",
+            "net_cash_flow_from_operating_activities_discontinued_operations": "netCashFlowFromOperatingActivitiesDiscontinuedOperations",
+            "net_cash_flow_from_investing_activities_discontinued_operations": "netCashFlowFromInvestingActivitiesDiscontinuedOperations",
+            "net_cash_flow_from_financing_activities_discontinued_operations": "netCashFlowFromFinancingActivitiesDiscontinuedOperations",
+            "net_cash_flow_from_discontinued_operations_discontinued_operations": "netCashFlowFromDiscontinuedOperationsDiscontinuedOperations",
+            "net_cash_flow_from_continuing_operations_discontinued_operations": "netCashFlowFromContinuingOperationsDiscontinuedOperations",
+            "net_cash_flow_from_operating_activities_continuing_operations_discontinued_operations": "netCashFlowFromOperatingActivitiesContinuingOperationsDiscontinuedOperations",
+            "net_cash_flow_from_investing_activities_continuing_operations_discontinued_operations": "netCashFlowFromInvestingActivitiesContinuingOperationsDiscontinuedOperations",
+            "net_cash_flow_from_financing_activities_continuing_operations_discontinued_operations": "netCashFlowFromFinancingActivitiesContinuingOperationsDiscontinuedOperations",
+            "net_cash_flow_from_discontinued_operations_continuing_operations_discontinued_operations": "netCashFlowFromDiscontinuedOperationsContinuingOperationsDiscontinuedOperations",
+            "net_cash_flow_from_continuing_operations_continuing_operations_discontinued_operations": "netCashFlowFromContinuingOperationsContinuingOperationsDiscontinuedOperations",
+        }
+        
+        # Convert to LineItem objects
+        result = []
+        for item in line_items:
+            if item in line_item_map:
+                finnhub_field = line_item_map[item]
+                value = None
+                
+                # Search in income statement
+                if finnhub_field in income:
+                    value = income[finnhub_field]
+                # Search in balance sheet
+                elif finnhub_field in balance:
+                    value = balance[finnhub_field]
+                # Search in cash flow statement
+                elif finnhub_field in cash_flow:
+                    value = cash_flow[finnhub_field]
+                
+                if value is not None:
+                    result.append(LineItem(
+                        name=item,
+                        value=value,
+                        report_period=end_date
+                    ))
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"Error fetching line items for {ticker}: {str(e)}")
+        raise
