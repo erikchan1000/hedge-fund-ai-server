@@ -10,7 +10,7 @@ export default function Home() {
   const handleSubmit = async (data: AnalysisRequest) => {
     setIsLoading(true);
     try {
-      const response = await fetch('http://127.0.0.1:80/api/generate_analysis', {
+      const response = await fetch('/api/generate_analysis', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
