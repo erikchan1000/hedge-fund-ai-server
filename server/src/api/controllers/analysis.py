@@ -32,8 +32,8 @@ def generate_stream(request_data: AnalysisRequest) -> Generator[str, None, None]
                 **result,
                 "timestamp": datetime.now().isoformat()
             }
-            # Format as proper SSE
-            yield f"data: {json.dumps(event)}\n\n"
+            # Send as raw JSON
+            yield json.dumps(event) + "\n"
             
     except Exception as e:
         logger.error(f"Error in stream generation: {str(e)}", exc_info=True)
@@ -42,7 +42,7 @@ def generate_stream(request_data: AnalysisRequest) -> Generator[str, None, None]
             "message": str(e),
             "timestamp": datetime.now().isoformat()
         }
-        yield f"data: {json.dumps(error_event)}\n\n"
+        yield json.dumps(error_event) + "\n"
 
 def handle_analysis_request(request_data: AnalysisRequest = None) -> Response:
     """Handle the analysis request and return a streaming response."""
@@ -70,7 +70,6 @@ def handle_analysis_request(request_data: AnalysisRequest = None) -> Response:
                 logger.error(f"Invalid request parameters: {str(e)}")
                 return jsonify({'error': f'Invalid request parameters: {str(e)}'}), 400
         
-        @stream_with_context
         def stream():
             logger.debug("Starting stream")
             for chunk in generate_stream(request_data):
@@ -79,12 +78,12 @@ def handle_analysis_request(request_data: AnalysisRequest = None) -> Response:
 
         return Response(
             stream(),
-            mimetype='text/event-stream',
+            mimetype='application/json',
             headers={
                 'Cache-Control': 'no-cache',
                 'Connection': 'keep-alive',
                 'X-Accel-Buffering': 'no',
-                'Content-Type': 'text/event-stream',
+                'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*'
             }
         )

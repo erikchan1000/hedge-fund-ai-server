@@ -27,6 +27,16 @@ const ANALYSTS = [
   { id: "warren_buffett", name: "Warren Buffett" },
   { id: "peter_lynch", name: "Peter Lynch" },
   { id: "charlie_munger", name: "Charlie Munger" },
+  { id: "phil_fisher", name: "Phil Fisher" },
+  { id: "michael_burry", name: "Michael Burry" },
+  { id: "stanley_druckenmiller", name: "Stanley Druckenmiller" },
+  { id: "bill_ackman", name: "Bill Ackman" },
+  { id: "cathie_wood", name: "Cathie Wood" },
+  { id: "ben_graham", name: "Ben Graham" },
+  { id: "fundamentals_analyst", name: "Fundamentals Analyst" },
+  { id: "technical_analyst", name: "Technical Analyst" },
+  { id: "sentiment_analyst", name: "Sentiment Analyst" },
+  { id: "valuation_analyst", name: "Valuation Analyst" }
 ];
 
 export function AnalysisForm({ onSubmit, isLoading }: AnalysisFormProps) {

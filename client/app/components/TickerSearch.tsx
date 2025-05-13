@@ -55,16 +55,10 @@ export function TickerSearch({ selectedTickers, onTickerSelect }: TickerSearchPr
   );
 
   useEffect(() => {
-    // Fetch initial tickers when component mounts
-    fetchTickers('', true);
-  }, []);
-
-  useEffect(() => {
-    searchTickers(searchTerm);
-    return () => {
-      searchTickers.cancel();
-    };
-  }, [searchTerm, searchTickers]);
+    if (open) {
+      searchTickers(searchTerm);
+    }
+  }, [searchTerm, searchTickers, open]);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -80,11 +74,13 @@ export function TickerSearch({ selectedTickers, onTickerSelect }: TickerSearchPr
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-full p-0" align="start">
-        <Command className="rounded-lg border shadow-md">
+        <Command shouldFilter={false} className="rounded-lg border shadow-md">
           <CommandInput 
             placeholder="Search tickers..." 
             value={searchTerm}
-            onValueChange={setSearchTerm}
+            onValueChange={(value) => {
+              setSearchTerm(value);
+            }}
             className="border-b"
           />
           <CommandEmpty className="py-6 text-center text-sm">
