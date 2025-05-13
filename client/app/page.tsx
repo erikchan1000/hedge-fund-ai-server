@@ -2,7 +2,36 @@
 
 import { useState } from 'react';
 import { AnalysisForm } from './components/AnalysisForm';
+import { AnalysisResults } from './components/AnalysisResults';
 import { AnalysisRequest } from './types/analysis';
+
+interface ReturnData {
+  decisions: {
+    [ticker: string]: {
+      action: string;
+      quantity: number;
+      confidence: number;
+      reasoning: string;
+    }
+  };
+  analyst_signals: {
+    [agent: string]: {
+      [ticker: string]: {
+        signal?: string;
+        confidence?: number;
+        reasoning?: string | {
+          portfolio_value: number;
+          current_position: number;
+          position_limit: number;
+          remaining_limit: number;
+          available_cash: number;
+        };
+        remaining_position_limit?: number;
+        current_price?: number;
+      }
+    }
+  };
+}
 
 export default function Home() {
   const [isLoading, setIsLoading] = useState(false);
@@ -13,7 +42,7 @@ export default function Home() {
     current_analyst?: string;
     analyst_progress?: string;
   }>({});
-  const [result, setResult] = useState<any>(null);
+  const [result, setResult] = useState<ReturnData | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const handleSubmit = async (data: AnalysisRequest) => {
@@ -113,10 +142,7 @@ export default function Home() {
 
         {result && (
           <div className="w-full mt-4">
-            <h2 className="text-xl font-semibold mb-4">Analysis Results</h2>
-            <pre className="bg-gray-50 p-4 rounded-md overflow-auto">
-              {JSON.stringify(result, null, 2)}
-            </pre>
+            <AnalysisResults data={result} />
           </div>
         )}
       </main>

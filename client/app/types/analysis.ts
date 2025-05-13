@@ -15,4 +15,32 @@ export interface Ticker {
 export interface AnalysisFormProps {
   onSubmit: (data: AnalysisRequest) => void;
   isLoading: boolean;
+}
+
+export interface ReturnData {
+  decisions: {
+    [ticker: string]: {
+      action: string;
+      quantity: number;
+      confidence: number;
+      reasoning: string;
+    }
+  };
+  analyst_signals: {
+    [agent: string]: {
+      [ticker: string]: {
+        signal?: string;
+        confidence?: number;
+        reasoning?: string | {
+          portfolio_value: number;
+          current_position: number;
+          position_limit: number;
+          remaining_limit: number;
+          available_cash: number;
+        };
+        remaining_position_limit?: number;
+        current_price?: number;
+      }
+    }
+  };
 } 
