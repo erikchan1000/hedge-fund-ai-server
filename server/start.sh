@@ -75,9 +75,11 @@ fi
 # Get local IP
 LOCAL_IP=$(get_local_ip)
 
+
 # Set environment variables
 export FLASK_APP="src/app.py"
 export FLASK_ENV="development"
+export PORT="$PORT"
 
 # Print server information
 echo -e "${GREEN}Starting Flask server...${NC}"
@@ -87,11 +89,8 @@ echo -e "Press Ctrl+C to stop the server${NC}"
 
 # Start the server
 if command -v conda &> /dev/null; then
-    # Activate conda environment
-    activate_conda
-    conda activate ai-hedge-fund  # Replace with your conda environment name
-    python src/app.py
+  poetry run python src/app.py
 else
     echo -e "${YELLOW}Conda not found. Using system Python...${NC}"
-    python src/app.py
-fi 
+    poetry run python src/app.py
+fi
