@@ -78,6 +78,7 @@ LOCAL_IP=$(get_local_ip)
 # Set environment variables
 export FLASK_APP="src/app.py"
 export FLASK_ENV="development"
+export PORT="$PORT"
 
 # Print server information
 echo -e "${GREEN}Starting Flask server...${NC}"
@@ -93,5 +94,5 @@ if command -v conda &> /dev/null; then
     python src/app.py
 else
     echo -e "${YELLOW}Conda not found. Using system Python...${NC}"
-    python src/app.py
-fi 
+    poetry run python src/app.py
+fi

@@ -8,17 +8,12 @@ from datetime import datetime, timedelta
 from data.cache import get_cache
 from data.models import (
     CompanyNews,
-    CompanyNewsResponse,
     FinancialMetrics,
-    FinancialMetricsResponse,
     Price,
-    PriceResponse,
     LineItem,
-    LineItemResponse,
     InsiderTrade,
-    InsiderTradeResponse,
-    CompanyFactsResponse,
-)
+    )
+
 from .finnhub_client import FinnHubClient
 from .alpaca_client import AlpacaClient
 
@@ -45,7 +40,7 @@ def get_prices(ticker: str, start_date: str, end_date: str) -> List[Price]:
     try:
         # Fetch from Alpaca
         data = alpaca_client.get_stock_price(ticker, start_date, end_date)
-        
+
         if data["s"] != "ok":
             raise Exception(f"Error fetching data: {ticker} - {data['s']}")
 
@@ -81,7 +76,7 @@ def get_financial_metrics(
     """Fetch financial metrics from cache or FinnHub API."""
     # Check cache first
     if cached_data := _cache.get_financial_metrics(ticker):
-        filtered_data = [FinancialMetrics(**metric) for metric in cached_data 
+        filtered_data = [FinancialMetrics(**metric) for metric in cached_data
                         if metric["report_period"] <= end_date]
         filtered_data.sort(key=lambda x: x.report_period, reverse=True)
         if filtered_data:
@@ -90,12 +85,13 @@ def get_financial_metrics(
     try:
         # Get company profile for basic metrics
         profile = finnhub_client.get_company_profile(ticker)
-        
+
         # Get financial statements
         income = finnhub_client.get_financial_statements(ticker, "income")
         balance = finnhub_client.get_financial_statements(ticker, "balance")
         cash_flow = finnhub_client.get_financial_statements(ticker, "cash")
-        
+        print("Debug profile", profile, income, balance, cash_flow)
+
         # Convert to our FinancialMetrics model
         metrics = FinancialMetrics(
             report_period=end_date,
@@ -123,7 +119,7 @@ def get_insider_trades(
     """Fetch insider trades from cache or FinnHub API."""
     # Check cache first
     if cached_data := _cache.get_insider_trades(ticker):
-        filtered_data = [InsiderTrade(**trade) for trade in cached_data 
+        filtered_data = [InsiderTrade(**trade) for trade in cached_data
                         if (start_date is None or trade["transaction_date"] >= start_date)
                         and trade["transaction_date"] <= end_date]
         filtered_data.sort(key=lambda x: x.transaction_date, reverse=True)
@@ -133,7 +129,7 @@ def get_insider_trades(
     try:
         # Fetch from FinnHub
         data = finnhub_client.get_insider_transactions(ticker)
-        
+
         # Convert to our InsiderTrade model
         trades = []
         for trade in data.get("data", []):
@@ -142,7 +138,7 @@ def get_insider_trades(
             shares = abs(trade.get("change", 0))
             price_per_share = trade.get("price", 0)
             total_value = shares * price_per_share
-            
+
             trades.append(InsiderTrade(
                 ticker=ticker,
                 issuer=ticker,  # Using ticker as issuer since FinnHub doesn't provide this
@@ -179,7 +175,7 @@ def get_company_news(
     """Fetch company news from cache or FinnHub API."""
     # Check cache first
     if cached_data := _cache.get_company_news(ticker):
-        filtered_data = [CompanyNews(**news) for news in cached_data 
+        filtered_data = [CompanyNews(**news) for news in cached_data
                         if (start_date is None or news["date"] >= start_date)
                         and news["date"] <= end_date]
         filtered_data.sort(key=lambda x: x.date, reverse=True)
@@ -189,13 +185,13 @@ def get_company_news(
     try:
         # Fetch from FinnHub
         data = finnhub_client.get_company_news(ticker, start_date or "2020-01-01", end_date)
-        
+
         # Convert to our CompanyNews model
         news_items = []
         for item in data:
             # Convert timestamp to date string
             date = datetime.fromtimestamp(item.get("datetime", 0)).strftime("%Y-%m-%d")
-            
+
             news_items.append(CompanyNews(
                 ticker=ticker,
                 title=item.get("headline", ""),
@@ -250,7 +246,7 @@ def search_line_items(ticker: str, line_items: List[str], end_date: str) -> List
         income = finnhub_client.get_financial_statements(ticker, "income")
         balance = finnhub_client.get_financial_statements(ticker, "balance")
         cash_flow = finnhub_client.get_financial_statements(ticker, "cash")
-        
+
         # Map line items to FinnHub fields
         line_item_map = {
             "earnings_per_share": "basicEps",
@@ -300,14 +296,14 @@ def search_line_items(ticker: str, line_items: List[str], end_date: str) -> List
             "net_cash_flow_from_discontinued_operations_continuing_operations_discontinued_operations": "netCashFlowFromDiscontinuedOperationsContinuingOperationsDiscontinuedOperations",
             "net_cash_flow_from_continuing_operations_continuing_operations_discontinued_operations": "netCashFlowFromContinuingOperationsContinuingOperationsDiscontinuedOperations",
         }
-        
+
         # Convert to LineItem objects
         result = []
         for item in line_items:
             if item in line_item_map:
                 finnhub_field = line_item_map[item]
                 value = None
-                
+
                 # Search in income statement
                 if finnhub_field in income:
                     value = income[finnhub_field]
@@ -317,16 +313,16 @@ def search_line_items(ticker: str, line_items: List[str], end_date: str) -> List
                 # Search in cash flow statement
                 elif finnhub_field in cash_flow:
                     value = cash_flow[finnhub_field]
-                
+
                 if value is not None:
                     result.append(LineItem(
                         name=item,
                         value=value,
                         report_period=end_date
                     ))
-        
+
         return result
-        
+
     except Exception as e:
         logger.error(f"Error fetching line items for {ticker}: {str(e)}")
         raise
