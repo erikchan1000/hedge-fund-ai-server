@@ -67,4 +67,4 @@ echo Network URL: http://%IP%:%PORT%
 echo Press Ctrl+C to stop the server
 
 :: Start the server
-python src/app.py 
+poetry run python src/app.py

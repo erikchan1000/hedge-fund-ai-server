@@ -1,7 +1,11 @@
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { ReturnData } from "../types/analysis";
+import { ReturnData, AgentType } from "../types/analysis";
+import { FundamentalAnalysisCard } from "./analysis/FundamentalAnalysisCard";
+import { TechnicalAnalysisCard } from "./analysis/TechnicalAnalysisCard";
+import { ValuationAnalysisCard } from "./analysis/ValuationAnalysisCard";
+import { AnalystSignalCard } from "./analysis/AnalystSignalCard";
 
 interface AnalysisResultsProps {
   data: ReturnData;
@@ -61,72 +65,20 @@ export function AnalysisResults({ data }: AnalysisResultsProps) {
             {Object.entries(data.analyst_signals).map(([agent, signals]) => (
               <div key={agent} className="space-y-4">
                 <h3 className="text-lg font-semibold capitalize">{agent.replace(/_/g, ' ')}</h3>
-                {Object.entries(signals).map(([ticker, signal]) => (
-                  <Card key={`${agent}-${ticker}`}>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-lg">{ticker}</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="space-y-3">
-                        {signal.signal && (
-                          <div className="flex items-center gap-2">
-                            <span className="text-sm text-muted-foreground">Signal:</span>
-                            <Badge variant={signal.signal === "bullish" ? "default" : "destructive"}>
-                              {signal.signal.toUpperCase()}
-                            </Badge>
-                          </div>
-                        )}
-                        {signal.confidence && (
-                          <div className="space-y-1">
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm text-muted-foreground">Confidence</span>
-                              <span className="font-medium">{signal.confidence}%</span>
-                            </div>
-                            <Progress value={signal.confidence} className="h-2" />
-                          </div>
-                        )}
-                        {signal.remaining_position_limit && (
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm text-muted-foreground">Position Limit</span>
-                              <span className="font-medium">${signal.remaining_position_limit.toLocaleString()}</span>
-                            </div>
-                            {signal.current_price && (
-                              <div className="flex items-center justify-between">
-                                <span className="text-sm text-muted-foreground">Current Price</span>
-                                <span className="font-medium">${signal.current_price.toLocaleString()}</span>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                        {typeof signal.reasoning === 'string' ? (
-                          <p className="text-sm text-muted-foreground">{signal.reasoning}</p>
-                        ) : signal.reasoning && (
-                          <div className="space-y-2">
-                            <div className="grid grid-cols-2 gap-2 text-sm">
-                              <div>
-                                <span className="text-muted-foreground">Portfolio Value:</span>
-                                <span className="ml-2 font-medium">${signal.reasoning.portfolio_value.toLocaleString()}</span>
-                              </div>
-                              <div>
-                                <span className="text-muted-foreground">Current Position:</span>
-                                <span className="ml-2 font-medium">${signal.reasoning.current_position.toLocaleString()}</span>
-                              </div>
-                              <div>
-                                <span className="text-muted-foreground">Position Limit:</span>
-                                <span className="ml-2 font-medium">${signal.reasoning.position_limit.toLocaleString()}</span>
-                              </div>
-                              <div>
-                                <span className="text-muted-foreground">Available Cash:</span>
-                                <span className="ml-2 font-medium">${signal.reasoning.available_cash.toLocaleString()}</span>
-                              </div>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                {Object.entries(signals).map(([ticker, signal]) => {
+                  switch (agent) {
+                    case AgentType.FUNDAMENTALS:
+                      return <FundamentalAnalysisCard key={ticker} ticker={ticker} analysis={signal} />;
+                    case AgentType.TECHNICAL:
+                      return <TechnicalAnalysisCard key={ticker} ticker={ticker} analysis={signal} />;
+                    case AgentType.VALUATION:
+                      return <ValuationAnalysisCard key={ticker} ticker={ticker} analysis={signal} />;
+                    case AgentType.SENTIMENT:
+                      return <AnalystSignalCard key={ticker} ticker={ticker} signal={signal} />;
+                    default:
+                      return null;
+                  }
+                })}
               </div>
             ))}
           </div>

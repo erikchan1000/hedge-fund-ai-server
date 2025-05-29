@@ -1,21 +1,35 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useCallback } from 'react';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "@/components/ui/command";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useState, useEffect, useCallback } from "react";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+} from "@/components/ui/command";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Check, ChevronsUpDown } from "lucide-react";
-import { Ticker } from '../types/analysis';
-import debounce from 'lodash/debounce';
+import { Ticker } from "../types/analysis";
+import debounce from "lodash/debounce";
+import { cn } from "@/lib/utils";
 
 interface TickerSearchProps {
   selectedTickers: string[];
   onTickerSelect: (ticker: string) => void;
 }
 
-export function TickerSearch({ selectedTickers, onTickerSelect }: TickerSearchProps) {
+export function TickerSearch({
+  selectedTickers,
+  onTickerSelect,
+}: TickerSearchProps) {
   const [open, setOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchTerm, setSearchTerm] = useState("");
   const [filteredTickers, setFilteredTickers] = useState<Ticker[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
@@ -27,11 +41,11 @@ export function TickerSearch({ selectedTickers, onTickerSelect }: TickerSearchPr
         : `/api/search-tickers?q=${encodeURIComponent(term)}`;
 
       const response = await fetch(url);
-      if (!response.ok) throw new Error('Failed to fetch tickers');
+      if (!response.ok) throw new Error("Failed to fetch tickers");
       const data = await response.json();
       setFilteredTickers(data);
     } catch (error) {
-      console.error('Error searching tickers:', error);
+      console.error("Error searching tickers:", error);
       setFilteredTickers([]);
     } finally {
       setIsLoading(false);
@@ -42,12 +56,12 @@ export function TickerSearch({ selectedTickers, onTickerSelect }: TickerSearchPr
     debounce(async (term: string) => {
       if (!term) {
         // If search term is empty, show initial results
-        await fetchTickers('', true);
+        await fetchTickers("", true);
         return;
       }
       await fetchTickers(term);
     }, 300),
-    []
+    [],
   );
 
   useEffect(() => {
@@ -80,7 +94,7 @@ export function TickerSearch({ selectedTickers, onTickerSelect }: TickerSearchPr
             className="border-b"
           />
           <CommandEmpty className="py-6 text-center text-sm">
-            {isLoading ? 'Searching...' : 'No ticker found.'}
+            {isLoading ? "Searching..." : "No ticker found."}
           </CommandEmpty>
           <CommandGroup className="max-h-[600px] overflow-y-auto">
             {filteredTickers.map((ticker) => (
@@ -95,7 +109,9 @@ export function TickerSearch({ selectedTickers, onTickerSelect }: TickerSearchPr
                 <Check
                   className={cn(
                     "mr-2 h-4 w-4",
-                    selectedTickers.includes(ticker.symbol) ? "opacity-100" : "opacity-0"
+                    selectedTickers.includes(ticker.symbol)
+                      ? "opacity-100"
+                      : "opacity-0",
                   )}
                 />
                 {ticker.symbol}
