@@ -5,7 +5,6 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem } from "
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { Check, ChevronsUpDown } from "lucide-react";
-import { cn } from "@/lib/utils";
 import { Ticker } from '../types/analysis';
 import debounce from 'lodash/debounce';
 
@@ -13,9 +12,6 @@ interface TickerSearchProps {
   selectedTickers: string[];
   onTickerSelect: (ticker: string) => void;
 }
-
-const MAX_RESULTS = 20;
-const INITIAL_RESULTS = 50;
 
 export function TickerSearch({ selectedTickers, onTickerSelect }: TickerSearchProps) {
   const [open, setOpen] = useState(false);
@@ -26,10 +22,10 @@ export function TickerSearch({ selectedTickers, onTickerSelect }: TickerSearchPr
   const fetchTickers = async (term: string, isInitial: boolean = false) => {
     setIsLoading(true);
     try {
-      const url = isInitial 
+      const url = isInitial
         ? `/api/search-tickers?initial=true`
         : `/api/search-tickers?q=${encodeURIComponent(term)}`;
-      
+
       const response = await fetch(url);
       if (!response.ok) throw new Error('Failed to fetch tickers');
       const data = await response.json();
@@ -75,8 +71,8 @@ export function TickerSearch({ selectedTickers, onTickerSelect }: TickerSearchPr
       </PopoverTrigger>
       <PopoverContent className="w-full p-0" align="start">
         <Command shouldFilter={false} className="rounded-lg border shadow-md">
-          <CommandInput 
-            placeholder="Search tickers..." 
+          <CommandInput
+            placeholder="Search tickers..."
             value={searchTerm}
             onValueChange={(value) => {
               setSearchTerm(value);
@@ -110,4 +106,4 @@ export function TickerSearch({ selectedTickers, onTickerSelect }: TickerSearchPr
       </PopoverContent>
     </Popover>
   );
-} 
+}
