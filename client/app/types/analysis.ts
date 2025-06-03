@@ -94,6 +94,14 @@ export interface TechnicalStrategy {
   metrics: TechnicalMetrics;
 }
 
+export interface PersonalityAgent {
+  [ticker: string]: {
+    confidence: number;
+    reasoning: string;
+    signal: SignalType;
+  }
+}
+
 export interface TechnicalAnalysis {
   signal: SignalType;
   confidence: number;
