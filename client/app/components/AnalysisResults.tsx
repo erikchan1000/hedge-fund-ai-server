@@ -7,6 +7,7 @@ import { TechnicalAnalysisCard } from "./analysis/TechnicalAnalysisCard";
 import { ValuationAnalysisCard } from "./analysis/ValuationAnalysisCard";
 import { AnalystSignalCard } from "./analysis/AnalystSignalCard";
 import { RiskAnalysisCard } from "./analysis/RiskAnalysisCard";
+import { PersonalityCard } from "./analysis/PersonalityCard";
 import { cn } from "@/lib/utils";
 
 interface AnalysisResultsProps {
@@ -88,7 +89,7 @@ export function AnalysisResults({ data }: AnalysisResultsProps) {
                     case AgentType.RISK:
                       return <RiskAnalysisCard key={ticker} ticker={ticker} analysis={signal} />;
                     default:
-                      return null;
+                      return <PersonalityCard key={ticker} ticker={ticker} analysis={signal} />;
                   }
                 })}
               </div>
