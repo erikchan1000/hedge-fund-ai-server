@@ -67,3 +67,8 @@ Required environment variables for the server:
 
 - Server runs on `http://localhost:5000` by default
 - Client runs on `http://localhost:3000` by default
+
+## Demo
+![image](https://github.com/user-attachments/assets/c5fdaf4c-d650-4c17-b2c1-c3720e32a847)
+![image](https://github.com/user-attachments/assets/80bd0fa6-cfda-4f3d-b2a8-ef66a0eddc68)
+
