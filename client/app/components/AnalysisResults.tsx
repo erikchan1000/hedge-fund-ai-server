@@ -6,12 +6,22 @@ import { FundamentalAnalysisCard } from "./analysis/FundamentalAnalysisCard";
 import { TechnicalAnalysisCard } from "./analysis/TechnicalAnalysisCard";
 import { ValuationAnalysisCard } from "./analysis/ValuationAnalysisCard";
 import { AnalystSignalCard } from "./analysis/AnalystSignalCard";
+import { RiskAnalysisCard } from "./analysis/RiskAnalysisCard";
+import { cn } from "@/lib/utils";
 
 interface AnalysisResultsProps {
   data: ReturnData;
 }
 
 export function AnalysisResults({ data }: AnalysisResultsProps) {
+  const actionStyles = {
+    buy: "bg-green-500 hover:bg-green-600 text-white",
+    sell: "bg-yellow-500 hover:bg-yellow-600 text-white",
+    short: "bg-red-500 hover:bg-red-600 text-white",
+    cover: "bg-yellow-500 hover:bg-yellow-600 text-white",
+    hold: "bg-yellow-500 hover:bg-yellow-600 text-white"
+  };
+
   return (
     <div className="space-y-6">
       {/* Decisions Section */}
@@ -27,7 +37,7 @@ export function AnalysisResults({ data }: AnalysisResultsProps) {
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-lg">{ticker}</CardTitle>
-                    <Badge variant={decision.action === "buy" ? "default" : "destructive"}>
+                    <Badge className={cn(actionStyles[decision.action as keyof typeof actionStyles])}>
                       {decision.action.toUpperCase()}
                     </Badge>
                   </div>
@@ -75,6 +85,8 @@ export function AnalysisResults({ data }: AnalysisResultsProps) {
                       return <ValuationAnalysisCard key={ticker} ticker={ticker} analysis={signal} />;
                     case AgentType.SENTIMENT:
                       return <AnalystSignalCard key={ticker} ticker={ticker} signal={signal} />;
+                    case AgentType.RISK:
+                      return <RiskAnalysisCard key={ticker} ticker={ticker} analysis={signal} />;
                     default:
                       return null;
                   }

@@ -20,14 +20,16 @@ export interface AnalysisFormProps {
 export enum SignalType {
   BULLISH = 'bullish',
   BEARISH = 'bearish',
-  NEUTRAL = 'neutral'
+  NEUTRAL = 'neutral',
+  HOLD = 'hold'
 }
 
 export enum AgentType {
   FUNDAMENTALS = 'fundamentals_agent',
   SENTIMENT = 'sentiment_agent',
   TECHNICAL = 'technical_analyst_agent',
-  VALUATION = 'valuation_agent'
+  VALUATION = 'valuation_agent',
+  RISK = 'risk_management_agent'
 }
 
 export interface FundamentalAnalysis {
@@ -120,11 +122,24 @@ export interface AnalystSignal {
   current_price?: number;
 }
 
+export interface RiskAnalysis {
+  remaining_position_limit: number;
+  current_price: number;
+  reasoning: {
+    portfolio_value: number;
+    current_position: number;
+    position_limit: number;
+    remaining_limit: number;
+    available_cash: number;
+  };
+}
+
 export type AgentAnalysisMap = {
   [AgentType.FUNDAMENTALS]: FundamentalAnalysis;
   [AgentType.VALUATION]: ValuationAnalysis;
   [AgentType.TECHNICAL]: TechnicalAnalysis;
   [AgentType.SENTIMENT]: AnalystSignal;
+  [AgentType.RISK]: RiskAnalysis;
 };
 
 export interface ReturnData {
