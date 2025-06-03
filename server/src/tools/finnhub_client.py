@@ -1,7 +1,7 @@
 import os
 import time
 import logging
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 import requests
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
@@ -45,10 +45,13 @@ class FinnHubClient:
         self._wait_for_rate_limit()
         
         url = f"{self.base_url}/{endpoint}"
-        headers = {"X-Finnhub-Token": self.api_key}
+        params = params or {}
+        
+        # Add API key as token parameter (correct FinnHub authentication method)
+        params["token"] = self.api_key
         
         try:
-            response = requests.get(url, headers=headers, params=params)
+            response = requests.get(url, params=params)
             response.raise_for_status()
             return response.json()
         except requests.exceptions.RequestException as e:
@@ -73,17 +76,25 @@ class FinnHubClient:
         return self._make_request("stock/profile2", {"symbol": symbol})
     
     def get_financial_statements(self, symbol: str, statement: str = "income") -> Dict[str, Any]:
-        """Get financial statements (income, balance, cash flow)."""
-        return self._make_request(f"stock/financials-reported", {
+        """Get financial statements using metric endpoint for processed data."""
+        # Use the metric endpoint which provides standardized financial metrics
+        return self._make_request("stock/metric", {
             "symbol": symbol,
-            "statement": statement
+            "metric": "all"  # Get all available metrics
+        })
+    
+    def get_basic_financials(self, symbol: str) -> Dict[str, Any]:
+        """Get basic financial metrics using the correct endpoint."""
+        return self._make_request("stock/metric", {
+            "symbol": symbol,
+            "metric": "all"
         })
     
     def get_insider_transactions(self, symbol: str) -> Dict[str, Any]:
         """Get insider transactions."""
         return self._make_request("stock/insider-transactions", {"symbol": symbol})
     
-    def get_company_news(self, symbol: str, start_date: str, end_date: str) -> Dict[str, Any]:
+    def get_company_news(self, symbol: str, start_date: str, end_date: str) -> List[Dict[str, Any]]:
         """Get company news."""
         return self._make_request("company-news", {
             "symbol": symbol,
@@ -92,7 +103,7 @@ class FinnHubClient:
         })
     
     def get_quote(self, symbol: str) -> Dict[str, Any]:
-        """Get real-time quote including market cap."""
+        """Get real-time quote."""
         return self._make_request("quote", {"symbol": symbol})
     
     def get_technical_indicators(self, symbol: str, indicator: str, 

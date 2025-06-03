@@ -1,56 +1,14 @@
 'use client';
 
-import { useState } from 'react';
 import { AnalysisForm } from './components/AnalysisForm';
 import { AnalysisResults } from './components/AnalysisResults';
-import { AnalysisRequest } from './types/analysis';
-
-interface ReturnData {
-  decisions: {
-    [ticker: string]: {
-      action: string;
-      quantity: number;
-      confidence: number;
-      reasoning: string;
-    }
-  };
-  analyst_signals: {
-    [agent: string]: {
-      [ticker: string]: {
-        signal?: string;
-        confidence?: number;
-        reasoning?: string | {
-          portfolio_value: number;
-          current_position: number;
-          position_limit: number;
-          remaining_limit: number;
-          available_cash: number;
-        };
-        remaining_position_limit?: number;
-        current_price?: number;
-      }
-    }
-  };
-}
+import { AnalysisRequest, ReturnData } from './types/analysis';
+import { useStreamProcessor } from './utils/useStreamProcessor';
 
 export default function Home() {
-  const [isLoading, setIsLoading] = useState(false);
-  const [progress, setProgress] = useState<{
-    stage?: string;
-    message?: string;
-    progress?: number;
-    current_analyst?: string;
-    analyst_progress?: string;
-  }>({});
-  const [result, setResult] = useState<ReturnData | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { isLoading, progress, result, error, processStream } = useStreamProcessor<ReturnData>();
 
   const handleSubmit = async (data: AnalysisRequest) => {
-    setIsLoading(true);
-    setError(null);
-    setResult(null);
-    setProgress({});
-
     try {
       const response = await fetch('/api/generate_analysis', {
         method: 'POST',
@@ -64,48 +22,9 @@ export default function Home() {
         throw new Error('Failed to generate analysis');
       }
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('No reader available');
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        // Convert the chunk to text
-        const chunk = new TextDecoder().decode(value);
-        
-        // Split the chunk into individual JSON messages
-        const messages = chunk.split('\n').filter(msg => msg.trim());
-        
-        for (let message of messages) {
-          try {
-            message = message.replace('data: ', '')
-            const data = JSON.parse(message);
-            
-            if (data.type === 'progress') {
-              setProgress({
-                stage: data.stage,
-                message: data.message,
-                progress: data.progress,
-                current_analyst: data.current_analyst,
-                analyst_progress: data.analyst_progress,
-              });
-            } else if (data.type === 'result') {
-              setResult(data.data);
-            } else if (data.type === 'error') {
-              setError(data.message);
-            }
-          } catch (e) {
-            console.error('Error parsing message:', e);
-            console.error('Failed message:', message);
-          }
-        }
-      }
+      await processStream(response);
     } catch (error) {
       console.error('Error:', error);
-      setError(error instanceof Error ? error.message : 'An unknown error occurred');
-    } finally {
-      setIsLoading(false);
     }
   };
 

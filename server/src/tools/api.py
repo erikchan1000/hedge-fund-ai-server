@@ -88,22 +88,60 @@ def get_financial_metrics(
             return filtered_data[:limit]
 
     try:
-        # Get company profile for basic metrics
+        # Get company profile for basic info
         profile = finnhub_client.get_company_profile(ticker)
         
-        # Get financial statements
-        income = finnhub_client.get_financial_statements(ticker, "income")
-        balance = finnhub_client.get_financial_statements(ticker, "balance")
-        cash_flow = finnhub_client.get_financial_statements(ticker, "cash")
+        # Get financial metrics using the metric endpoint (this contains the actual financial data)
+        metrics_data = finnhub_client.get_basic_financials(ticker)
         
-        # Convert to our FinancialMetrics model
+        # FinnHub metric endpoint returns data in "metric" field with the correct field names
+        metric = metrics_data.get("metric", {})
+        
+        # Build FinancialMetrics object using correct field names from actual API response
         metrics = FinancialMetrics(
+            ticker=ticker,
             report_period=end_date,
-            market_cap=profile.get("marketCapitalization"),
-            pe_ratio=profile.get("pe"),
-            pb_ratio=profile.get("pb"),
-            ps_ratio=profile.get("ps"),
-            # Add more metrics as needed
+            period=period,
+            currency=profile.get("currency", "USD"),
+            market_cap=metric.get("marketCapitalization"),
+            enterprise_value=metric.get("enterpriseValue"),
+            price_to_earnings_ratio=metric.get("peBasicExclExtraTTM"),
+            price_to_book_ratio=metric.get("pbAnnual"),
+            price_to_sales_ratio=metric.get("psAnnual"),
+            enterprise_value_to_ebitda_ratio=None,  # Not available in API response
+            enterprise_value_to_revenue_ratio=None,  # Not available in API response
+            free_cash_flow_yield=None,  # Not available in API response
+            peg_ratio=None,  # Not available in API response
+            gross_margin=metric.get("grossMarginTTM"),
+            operating_margin=metric.get("operatingMarginTTM"),
+            net_margin=metric.get("netProfitMarginTTM"),
+            return_on_equity=metric.get("roeTTM"),
+            return_on_assets=metric.get("roaTTM"),
+            return_on_invested_capital=metric.get("roiTTM"),  # Using roiTTM instead of roicTTM
+            asset_turnover=metric.get("assetTurnoverTTM"),
+            inventory_turnover=metric.get("inventoryTurnoverTTM"),
+            receivables_turnover=metric.get("receivablesTurnoverTTM"),
+            days_sales_outstanding=None,  # Not available in API response
+            operating_cycle=None,  # Not available in API response
+            working_capital_turnover=None,  # Not available in API response
+            current_ratio=metric.get("currentRatioAnnual"),
+            quick_ratio=metric.get("quickRatioAnnual"),
+            cash_ratio=None,  # Not available in API response
+            operating_cash_flow_ratio=None,  # Not available in API response
+            debt_to_equity=metric.get("totalDebt/totalEquityAnnual"),  # Correct field name with /
+            debt_to_assets=None,  # Not available in API response
+            interest_coverage=metric.get("netInterestCoverageTTM"),  # Using netInterestCoverageTTM
+            revenue_growth=metric.get("revenueGrowthTTMYoy"),  # Correct field name with Yoy suffix
+            earnings_growth=metric.get("epsGrowthTTMYoy"),  # Correct field name with Yoy suffix
+            book_value_growth=None,  # Not available in API response
+            earnings_per_share_growth=metric.get("epsGrowthTTMYoy"),  # Same as earnings_growth
+            free_cash_flow_growth=None,  # Not available in API response
+            operating_income_growth=None,  # Not available in API response
+            ebitda_growth=None,  # Not available in API response
+            payout_ratio=metric.get("payoutRatioTTM"),
+            earnings_per_share=metric.get("epsBasicExclExtraItemsTTM"),
+            book_value_per_share=metric.get("bookValuePerShareAnnual"),
+            free_cash_flow_per_share=None  # Not available in API response
         )
 
         # Cache the results
@@ -246,84 +284,70 @@ def get_price_data(ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
 def search_line_items(ticker: str, line_items: List[str], end_date: str) -> List[LineItem]:
     """Fetch specific financial line items from FinnHub API."""
     try:
-        # Get financial statements from FinnHub
-        income = finnhub_client.get_financial_statements(ticker, "income")
-        balance = finnhub_client.get_financial_statements(ticker, "balance")
-        cash_flow = finnhub_client.get_financial_statements(ticker, "cash")
+        # Get financial metrics using the metric endpoint
+        metrics_data = finnhub_client.get_basic_financials(ticker)
+        metric = metrics_data.get("metric", {})
+        series = metrics_data.get("series", {})
         
-        # Map line items to FinnHub fields
+        # Map line items to FinnHub metric fields (corrected mappings based on actual API response)
         line_item_map = {
-            "earnings_per_share": "basicEps",
-            "revenue": "totalRevenue",
-            "net_income": "netIncome",
-            "book_value_per_share": "bookValuePerShare",
-            "total_assets": "totalAssets",
-            "total_liabilities": "totalLiabilities",
-            "current_assets": "totalCurrentAssets",
-            "current_liabilities": "totalCurrentLiabilities",
-            "dividends_and_other_cash": "dividendsPaid",
-            "operating_cash_flow": "operatingCashFlow",
-            "free_cash_flow": "freeCashFlow",
-            "gross_profit": "grossProfit",
-            "operating_income": "operatingIncome",
-            "interest_expense": "interestExpense",
-            "depreciation_and_amortization": "depreciationAndAmortization",
-            "research_and_development": "researchAndDevelopment",
-            "selling_general_and_administrative": "sellingGeneralAndAdministrative",
-            "total_debt": "totalDebt",
-            "cash_and_equivalents": "cashAndCashEquivalents",
-            "inventory": "inventory",
-            "accounts_receivable": "netReceivables",
-            "accounts_payable": "accountsPayable",
-            "long_term_debt": "longTermDebt",
-            "short_term_debt": "shortTermDebt",
-            "capital_expenditures": "capitalExpenditure",
-            "net_cash_flow": "netCashFlow",
-            "net_cash_flow_from_operating_activities": "netCashFlowFromOperatingActivities",
-            "net_cash_flow_from_investing_activities": "netCashFlowFromInvestingActivities",
-            "net_cash_flow_from_financing_activities": "netCashFlowFromFinancingActivities",
-            "net_cash_flow_from_discontinued_operations": "netCashFlowFromDiscontinuedOperations",
-            "net_cash_flow_from_continuing_operations": "netCashFlowFromContinuingOperations",
-            "net_cash_flow_from_operating_activities_continuing_operations": "netCashFlowFromOperatingActivitiesContinuingOperations",
-            "net_cash_flow_from_investing_activities_continuing_operations": "netCashFlowFromInvestingActivitiesContinuingOperations",
-            "net_cash_flow_from_financing_activities_continuing_operations": "netCashFlowFromFinancingActivitiesContinuingOperations",
-            "net_cash_flow_from_discontinued_operations_continuing_operations": "netCashFlowFromDiscontinuedOperationsContinuingOperations",
-            "net_cash_flow_from_continuing_operations_continuing_operations": "netCashFlowFromContinuingOperationsContinuingOperations",
-            "net_cash_flow_from_operating_activities_discontinued_operations": "netCashFlowFromOperatingActivitiesDiscontinuedOperations",
-            "net_cash_flow_from_investing_activities_discontinued_operations": "netCashFlowFromInvestingActivitiesDiscontinuedOperations",
-            "net_cash_flow_from_financing_activities_discontinued_operations": "netCashFlowFromFinancingActivitiesDiscontinuedOperations",
-            "net_cash_flow_from_discontinued_operations_discontinued_operations": "netCashFlowFromDiscontinuedOperationsDiscontinuedOperations",
-            "net_cash_flow_from_continuing_operations_discontinued_operations": "netCashFlowFromContinuingOperationsDiscontinuedOperations",
-            "net_cash_flow_from_operating_activities_continuing_operations_discontinued_operations": "netCashFlowFromOperatingActivitiesContinuingOperationsDiscontinuedOperations",
-            "net_cash_flow_from_investing_activities_continuing_operations_discontinued_operations": "netCashFlowFromInvestingActivitiesContinuingOperationsDiscontinuedOperations",
-            "net_cash_flow_from_financing_activities_continuing_operations_discontinued_operations": "netCashFlowFromFinancingActivitiesContinuingOperationsDiscontinuedOperations",
-            "net_cash_flow_from_discontinued_operations_continuing_operations_discontinued_operations": "netCashFlowFromDiscontinuedOperationsContinuingOperationsDiscontinuedOperations",
-            "net_cash_flow_from_continuing_operations_continuing_operations_discontinued_operations": "netCashFlowFromContinuingOperationsContinuingOperationsDiscontinuedOperations",
+            "earnings_per_share": "epsBasicExclExtraItemsTTM",
+            "revenue": "revenuePerShareTTM",  # Updated to available field
+            "net_income": "netProfitMarginTTM",  # Using margin since absolute values not available
+            "book_value_per_share": "bookValuePerShareAnnual",
+            "total_assets": None,  # totalAssetsAnnual not available in API response
+            "total_liabilities": None,  # totalLiabilitiesAnnual not available in API response
+            "current_assets": None,  # currentAssetsAnnual not available in API response
+            "current_liabilities": None,  # currentLiabilitiesAnnual not available in API response
+            "operating_cash_flow": "cashFlowPerShareTTM",  # Using cash flow per share
+            "free_cash_flow": None,  # freeCashFlowTTM not available in API response
+            "gross_profit": "grossMarginTTM",  # Using margin since absolute values not available
+            "operating_income": "operatingMarginTTM",  # Using margin since absolute values not available
+            "interest_expense": None,  # interestExpenseTTM not available in API response
+            "total_debt": None,  # totalDebtAnnual not available in API response
+            "cash_and_equivalents": "cashPerSharePerShareAnnual",  # Using cash per share
+            "inventory": None,  # inventoryAnnual not available in API response
+            "accounts_receivable": None,  # accountsReceivableAnnual not available in API response
+            "long_term_debt": "longTermDebt/equityAnnual",  # Using debt ratio instead
+            "short_term_debt": None,  # shortTermDebtAnnual not available in API response
+            "capital_expenditures": None,  # capitalExpenditureTTM not available in API response
+            "dividends_and_other_cash": "dividendPerShareTTM",  # Using dividend per share
+            "depreciation_and_amortization": None,  # depreciationAmortizationTTM not available in API response
+            "research_and_development": None,  # researchNDevelopmentExpenseTTM not available in API response
+            "selling_general_and_administrative": None,  # sellGeneralAdminExpenseTotalTTM not available in API response
         }
         
         # Convert to LineItem objects
         result = []
         for item in line_items:
-            if item in line_item_map:
+            if item in line_item_map and line_item_map[item] is not None:
                 finnhub_field = line_item_map[item]
-                value = None
+                value = metric.get(finnhub_field)
                 
-                # Search in income statement
-                if finnhub_field in income:
-                    value = income[finnhub_field]
-                # Search in balance sheet
-                elif finnhub_field in balance:
-                    value = balance[finnhub_field]
-                # Search in cash flow statement
-                elif finnhub_field in cash_flow:
-                    value = cash_flow[finnhub_field]
+                # If not in metric, try to get from series data
+                if value is None and series:
+                    # For series data, look for annual data
+                    annual_series = series.get("annual", {})
+                    if annual_series and isinstance(annual_series, dict):
+                        series_data = annual_series.get(finnhub_field, [])
+                        if series_data and isinstance(series_data, list) and len(series_data) > 0:
+                            # Get the most recent period value
+                            recent_data = series_data[-1]
+                            value = recent_data.get("v") if isinstance(recent_data, dict) else recent_data
                 
                 if value is not None:
-                    result.append(LineItem(
-                        name=item,
-                        value=value,
-                        report_period=end_date
-                    ))
+                    # Ensure value is numeric
+                    try:
+                        numeric_value = float(value) if value is not None else None
+                        if numeric_value is not None:
+                            result.append(LineItem(
+                                name=item,
+                                value=numeric_value,
+                                report_period=end_date
+                            ))
+                    except (ValueError, TypeError):
+                        logger.warning(f"Could not convert value {value} to float for {item}")
+                        continue
         
         return result
         

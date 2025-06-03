@@ -45,12 +45,12 @@ cd client
 
 2. Install dependencies:
 ```bash
-npm install
+yarn
 ```
 
 3. Start the development server:
 ```bash
-npm run dev
+yarn dev
 ```
 
 The client will be available at `http://localhost:3000`

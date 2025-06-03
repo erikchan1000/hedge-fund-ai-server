@@ -28,7 +28,7 @@ export function TechnicalAnalysisCard({ ticker, analysis }: TechnicalAnalysisCar
               {Object.entries(data.metrics).map(([metric, value]) => (
                 <div key={metric}>
                   <span className="text-muted-foreground capitalize">{metric.replace(/_/g, ' ')}:</span>
-                  <span className="ml-2 font-medium">{value.toFixed(2)}</span>
+                  <span className="ml-2 font-medium">{value?.toFixed(2)}</span>
                 </div>
               ))}
             </div>
