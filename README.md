@@ -65,9 +65,5 @@ Required environment variables for the server:
 
 ## Development
 
-- Server runs on `http://localhost:8000` by default
+- Server runs on `http://localhost:5000` by default
 - Client runs on `http://localhost:3000` by default
-
-## License
-
-[Add your license information here]
