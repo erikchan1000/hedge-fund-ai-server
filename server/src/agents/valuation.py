@@ -44,6 +44,8 @@ def valuation_agent(state: AgentState):
 
         # --- Fine‑grained line‑items (need two periods to calc WC change) ---
         progress.update_status("valuation_agent", ticker, "Gathering line items")
+        
+        # First try TTM period
         line_items = search_line_items(
             ticker=ticker,
             line_items=[
@@ -57,10 +59,105 @@ def valuation_agent(state: AgentState):
             period="ttm",
             limit=2,
         )
-        if len(line_items) < 2:
-            progress.update_status("valuation_agent", ticker, "Failed: Insufficient financial line items")
+        
+        # Add logging to understand what was returned
+        from logging import getLogger  
+        logger = getLogger(__name__)
+        logger.info(f"Valuation agent for {ticker}: Requested 5 line items with limit=2 (TTM), got {len(line_items)} items")
+        
+        # Group by line item name to see what we actually have
+        items_by_name = {}
+        for item in line_items:
+            if item.name not in items_by_name:
+                items_by_name[item.name] = []
+            items_by_name[item.name].append(item)
+        
+        logger.info(f"TTM Line items by name for {ticker}:")
+        for name, items in items_by_name.items():
+            logger.info(f"  {name}: {len(items)} periods - {[f'{item.value} ({item.report_period})' for item in items]}")
+        
+        # Check if we have the required line items for TTM
+        required_items = ["free_cash_flow", "net_income", "depreciation_and_amortization", "capital_expenditure", "working_capital"]
+        missing_ttm_items = [item for item in required_items if item not in items_by_name]
+        
+        # If TTM data is insufficient, try annual period
+        if len(missing_ttm_items) >= 3:  # If missing 3+ key items, switch to annual
+            logger.info(f"TTM data insufficient for {ticker}, missing {missing_ttm_items}. Trying annual period...")
+            
+            line_items = search_line_items(
+                ticker=ticker,
+                line_items=[
+                    "free_cash_flow",
+                    "net_income", 
+                    "depreciation_and_amortization",
+                    "capital_expenditure",
+                    "working_capital",
+                ],
+                end_date=end_date,
+                period="annual", 
+                limit=2,
+            )
+            
+            # Re-group by line item name for annual data
+            items_by_name = {}
+            for item in line_items:
+                if item.name not in items_by_name:
+                    items_by_name[item.name] = []
+                items_by_name[item.name].append(item)
+            
+            logger.info(f"Annual Line items by name for {ticker}:")
+            for name, items in items_by_name.items():
+                logger.info(f"  {name}: {len(items)} periods - {[f'{item.value} ({item.report_period})' for item in items]}")
+            
+            missing_annual_items = [item for item in required_items if item not in items_by_name]
+            logger.info(f"Annual period missing items for {ticker}: {missing_annual_items}")
+        
+        # Check if we have the minimum required data
+        missing_items = [item for item in required_items if item not in items_by_name]
+        
+        if missing_items:
+            logger.warning(f"Missing required line items for {ticker}: {missing_items}")
+        
+        # We need at least net_income and free_cash_flow for basic valuation
+        essential_items = ["net_income", "free_cash_flow"]
+        missing_essential = [item for item in essential_items if item not in items_by_name]
+        
+        if missing_essential:
+            progress.update_status("valuation_agent", ticker, f"Failed: Missing essential line items: {missing_essential}")
+            logger.error(f"Missing essential line items for {ticker}: {missing_essential}")
             continue
-        li_curr, li_prev = line_items[0], line_items[1]
+        
+        # Get the values for calculation - use the most recent data available
+        try:
+            net_income_items = items_by_name.get("net_income", [])
+            free_cash_flow_items = items_by_name.get("free_cash_flow", [])
+            
+            if not net_income_items or not free_cash_flow_items:
+                progress.update_status("valuation_agent", ticker, "Failed: No data for essential metrics")
+                continue
+                
+            # Get most recent values
+            li_curr = type('LineItems', (), {
+                'net_income': net_income_items[0].value,
+                'free_cash_flow': free_cash_flow_items[0].value,
+                'depreciation_and_amortization': items_by_name.get("depreciation_and_amortization", [type('', (), {'value': 0})])[0].value,
+                'capital_expenditure': items_by_name.get("capital_expenditure", [type('', (), {'value': 0})])[0].value,
+                'working_capital': items_by_name.get("working_capital", [type('', (), {'value': 0})])[0].value,
+            })
+            
+            # Get previous period values if available
+            li_prev = type('LineItems', (), {
+                'net_income': net_income_items[1].value if len(net_income_items) > 1 else li_curr.net_income,
+                'free_cash_flow': free_cash_flow_items[1].value if len(free_cash_flow_items) > 1 else li_curr.free_cash_flow,
+                'depreciation_and_amortization': (items_by_name.get("depreciation_and_amortization", [None, type('', (), {'value': 0})])[1] or type('', (), {'value': 0})).value,
+                'capital_expenditure': (items_by_name.get("capital_expenditure", [None, type('', (), {'value': 0})])[1] or type('', (), {'value': 0})).value,
+                'working_capital': (items_by_name.get("working_capital", [None, type('', (), {'value': 0})])[1] or type('', (), {'value': 0})).value,
+            })
+            
+        except (IndexError, AttributeError) as e:
+            logger.error(f"Error extracting line item values for {ticker}: {e}")
+            progress.update_status("valuation_agent", ticker, "Failed: Error processing line item data")
+            continue
 
         # ------------------------------------------------------------------
         # Valuation models

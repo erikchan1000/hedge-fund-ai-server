@@ -73,7 +73,9 @@ class FinnHubClient:
     
     def get_company_profile(self, symbol: str) -> Dict[str, Any]:
         """Get company profile and basic financials."""
-        return self._make_request("stock/profile2", {"symbol": symbol})
+        res = self._make_request("stock/profile2", {"symbol": symbol})
+        res["shareOutstanding"] = res["shareOutstanding"] * 1000000
+        return res
     
     def get_financial_statements(self, symbol: str, statement: str = "income") -> Dict[str, Any]:
         """Get financial statements using metric endpoint for processed data."""
@@ -83,16 +85,60 @@ class FinnHubClient:
             "metric": "all"  # Get all available metrics
         })
     
-    def get_basic_financials(self, symbol: str) -> Dict[str, Any]:
+    def get_basic_financials(self, symbol: str, period: str = "ttm", limit: int = 10) -> Dict[str, Any]:
         """Get basic financial metrics using the correct endpoint."""
-        return self._make_request("stock/metric", {
+        params = {
             "symbol": symbol,
             "metric": "all"
-        })
+        }
+        
+        # Get all metrics from API
+        response = self._make_request("stock/metric", params)
+        
+        # Filter metrics based on period parameter
+        if "metric" in response:
+            filtered_metrics = {}
+            
+            # Determine the suffix to filter by based on period
+            if period.lower() == "ttm":
+                target_suffix = "TTM"
+            elif period.lower() in ["annual", "yearly"]:
+                target_suffix = "Annual"
+            elif period.lower() == "quarterly":
+                target_suffix = "Quarterly"
+            else:
+                # Default to TTM if period not recognized
+                target_suffix = "TTM"
+            
+            # Filter metrics that end with the target suffix or have no suffix (general metrics)
+            for key, value in response["metric"].items():
+                # Include metrics that end with target suffix
+                if key.endswith(target_suffix):
+                    filtered_metrics[key] = value
+                # Include general metrics that don't have period-specific suffixes
+                elif not any(key.endswith(suffix) for suffix in ["TTM", "Annual", "Quarterly"]):
+                    filtered_metrics[key] = value
+                # Special case: for TTM, also include some key metrics without suffix
+                elif target_suffix == "TTM" and key in [
+                    "marketCapitalization", "enterpriseValue", "beta", "52WeekHigh", "52WeekLow"
+                ]:
+                    filtered_metrics[key] = value
+            
+            response["metric"] = filtered_metrics
+        
+        return response
     
-    def get_insider_transactions(self, symbol: str) -> Dict[str, Any]:
-        """Get insider transactions."""
-        return self._make_request("stock/insider-transactions", {"symbol": symbol})
+    def get_insider_transactions(self, symbol: str, from_date: str = None, to_date: str = None) -> Dict[str, Any]:
+        """Get insider transactions with optional date filtering."""
+        params = {"symbol": symbol}
+        
+        # Add date parameters if provided
+        if from_date:
+            params["from"] = from_date
+        if to_date:
+            params["to"] = to_date
+            
+        return self._make_request("stock/insider-transactions", params)
     
     def get_company_news(self, symbol: str, start_date: str, end_date: str) -> List[Dict[str, Any]]:
         """Get company news."""
@@ -118,4 +164,35 @@ class FinnHubClient:
             "from": start_timestamp,
             "to": end_timestamp,
             "indicator": indicator
+        })
+    
+    def get_income_statement(self, symbol: str, freq: str = "annual") -> Dict[str, Any]:
+        """Get historical income statements."""
+        return self._make_request("stock/financials", {
+            "symbol": symbol,
+            "statement": "ic",  # income statement
+            "freq": freq  # annual or quarterly
+        })
+    
+    def get_balance_sheet(self, symbol: str, freq: str = "annual") -> Dict[str, Any]:
+        """Get historical balance sheets."""
+        return self._make_request("stock/financials", {
+            "symbol": symbol,
+            "statement": "bs",  # balance sheet
+            "freq": freq  # annual or quarterly
+        })
+    
+    def get_cash_flow_statement(self, symbol: str, freq: str = "annual") -> Dict[str, Any]:
+        """Get historical cash flow statements."""
+        return self._make_request("stock/financials", {
+            "symbol": symbol,
+            "statement": "cf",  # cash flow
+            "freq": freq  # annual or quarterly
+        })
+    
+    def get_historical_financial_metrics(self, symbol: str, metric: str = "all") -> Dict[str, Any]:
+        """Get historical financial metrics with time series data."""
+        return self._make_request("stock/metric", {
+            "symbol": symbol,
+            "metric": metric
         }) 
