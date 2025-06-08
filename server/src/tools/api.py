@@ -8,19 +8,14 @@ from datetime import datetime, timedelta
 from data.cache import get_cache
 from data.models import (
     CompanyNews,
-    CompanyNewsResponse,
     FinancialMetrics,
-    FinancialMetricsResponse,
     Price,
-    PriceResponse,
     LineItem,
-    LineItemResponse,
-    InsiderTrade,
-    InsiderTradeResponse,
-    CompanyFactsResponse,
+    InsiderTrade
 )
 from .finnhub_client import FinnHubClient
 from .alpaca_client import AlpacaClient
+from .finnhub_adapters import map_finnhub_metric_to_financial_metrics
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -94,54 +89,13 @@ def get_financial_metrics(
         # Get financial metrics using the metric endpoint (this contains the actual financial data)
         metrics_data = finnhub_client.get_basic_financials(ticker)
         
-        # FinnHub metric endpoint returns data in "metric" field with the correct field names
-        metric = metrics_data.get("metric", {})
-        
-        # Build FinancialMetrics object using correct field names from actual API response
-        metrics = FinancialMetrics(
-            ticker=ticker,
-            report_period=end_date,
-            period=period,
-            currency=profile.get("currency", "USD"),
-            market_cap=metric.get("marketCapitalization"),
-            enterprise_value=metric.get("enterpriseValue"),
-            price_to_earnings_ratio=metric.get("peBasicExclExtraTTM"),
-            price_to_book_ratio=metric.get("pbAnnual"),
-            price_to_sales_ratio=metric.get("psAnnual"),
-            enterprise_value_to_ebitda_ratio=None,  # Not available in API response
-            enterprise_value_to_revenue_ratio=None,  # Not available in API response
-            free_cash_flow_yield=None,  # Not available in API response
-            peg_ratio=None,  # Not available in API response
-            gross_margin=metric.get("grossMarginTTM"),
-            operating_margin=metric.get("operatingMarginTTM"),
-            net_margin=metric.get("netProfitMarginTTM"),
-            return_on_equity=metric.get("roeTTM"),
-            return_on_assets=metric.get("roaTTM"),
-            return_on_invested_capital=metric.get("roiTTM"),  # Using roiTTM instead of roicTTM
-            asset_turnover=metric.get("assetTurnoverTTM"),
-            inventory_turnover=metric.get("inventoryTurnoverTTM"),
-            receivables_turnover=metric.get("receivablesTurnoverTTM"),
-            days_sales_outstanding=None,  # Not available in API response
-            operating_cycle=None,  # Not available in API response
-            working_capital_turnover=None,  # Not available in API response
-            current_ratio=metric.get("currentRatioAnnual"),
-            quick_ratio=metric.get("quickRatioAnnual"),
-            cash_ratio=None,  # Not available in API response
-            operating_cash_flow_ratio=None,  # Not available in API response
-            debt_to_equity=metric.get("totalDebt/totalEquityAnnual"),  # Correct field name with /
-            debt_to_assets=None,  # Not available in API response
-            interest_coverage=metric.get("netInterestCoverageTTM"),  # Using netInterestCoverageTTM
-            revenue_growth=metric.get("revenueGrowthTTMYoy"),  # Correct field name with Yoy suffix
-            earnings_growth=metric.get("epsGrowthTTMYoy"),  # Correct field name with Yoy suffix
-            book_value_growth=None,  # Not available in API response
-            earnings_per_share_growth=metric.get("epsGrowthTTMYoy"),  # Same as earnings_growth
-            free_cash_flow_growth=None,  # Not available in API response
-            operating_income_growth=None,  # Not available in API response
-            ebitda_growth=None,  # Not available in API response
-            payout_ratio=metric.get("payoutRatioTTM"),
-            earnings_per_share=metric.get("epsBasicExclExtraItemsTTM"),
-            book_value_per_share=metric.get("bookValuePerShareAnnual"),
-            free_cash_flow_per_share=None  # Not available in API response
+        # Use the adapter to map Finnhub response to FinancialMetrics
+        metrics = map_finnhub_metric_to_financial_metrics(
+            ticker,
+            metrics_data,
+            end_date,
+            period,
+            profile.get("currency", "USD")
         )
 
         # Cache the results
