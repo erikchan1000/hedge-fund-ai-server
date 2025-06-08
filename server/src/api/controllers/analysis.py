@@ -7,10 +7,50 @@ from main import create_workflow
 from datetime import datetime
 import logging
 import json
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+def test_stream() -> Generator[str, None, None]:
+    """Test streaming endpoint to verify streaming works properly."""
+    for i in range(10):
+        event = {
+            "type": "progress",
+            "message": f"Test message {i + 1}",
+            "progress": (i + 1) * 10,
+            "timestamp": datetime.now().isoformat()
+        }
+        yield json.dumps(event) + "\n"
+        time.sleep(0.5)  # Simulate processing time
+    
+    # Final result
+    final_event = {
+        "type": "result",
+        "data": {"test": "completed"},
+        "timestamp": datetime.now().isoformat()
+    }
+    yield json.dumps(final_event) + "\n"
+
+def handle_test_stream() -> Response:
+    """Handle test streaming request."""
+    def stream():
+        for chunk in test_stream():
+            yield chunk
+    
+    return Response(
+        stream_with_context(stream()),
+        mimetype='application/json',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Transfer-Encoding': 'chunked'
+        }
+    )
 
 def generate_stream(request_data: AnalysisRequest) -> Generator[str, None, None]:
     """Generate a stream of analysis data and progress updates."""
@@ -32,8 +72,9 @@ def generate_stream(request_data: AnalysisRequest) -> Generator[str, None, None]
                 **result,
                 "timestamp": datetime.now().isoformat()
             }
-            # Send as raw JSON
-            yield json.dumps(event) + "\n"
+            # Send as raw JSON with immediate flush
+            json_data = json.dumps(event) + "\n"
+            yield json_data
             
     except Exception as e:
         logger.error(f"Error in stream generation: {str(e)}", exc_info=True)
@@ -77,14 +118,15 @@ def handle_analysis_request(request_data: AnalysisRequest = None) -> Response:
             logger.debug("Stream completed")
 
         return Response(
-            stream(),
+            stream_with_context(stream()),
             mimetype='application/json',
             headers={
                 'Cache-Control': 'no-cache',
                 'Connection': 'keep-alive',
                 'X-Accel-Buffering': 'no',
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
+                'Access-Control-Allow-Origin': '*',
+                'Transfer-Encoding': 'chunked'
             }
         )
         

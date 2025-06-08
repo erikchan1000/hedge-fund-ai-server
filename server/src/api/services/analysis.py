@@ -57,7 +57,6 @@ def process_analysis_request(request_data: AnalysisRequest) -> Generator[Dict[st
         }
     }
     
-    # Run the hedge fund analysis and yield results as they come
     for result in run_hedge_fund(
         tickers=tickers,
         start_date=start_date,
