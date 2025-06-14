@@ -6,6 +6,14 @@ interface StreamProgress {
   progress?: number;
   current_analyst?: string;
   analyst_progress?: string;
+  node?: string;
+  step?: number;
+}
+
+interface IntermediateResult {
+  node: string;
+  stage: string;
+  messages: string[];
 }
 
 interface StreamProcessorResult<T> {
@@ -13,6 +21,7 @@ interface StreamProcessorResult<T> {
   progress: StreamProgress;
   result: T | null;
   error: string | null;
+  intermediateResults: IntermediateResult[];
   processStream: (response: Response) => Promise<void>;
 }
 
@@ -21,12 +30,14 @@ export function useStreamProcessor<T>(): StreamProcessorResult<T> {
   const [progress, setProgress] = useState<StreamProgress>({});
   const [result, setResult] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [intermediateResults, setIntermediateResults] = useState<IntermediateResult[]>([]);
 
   const processStream = async (response: Response) => {
     setIsLoading(true);
     setError(null);
     setResult(null);
     setProgress({});
+    setIntermediateResults([]);
 
     try {
       const reader = response.body?.getReader();
@@ -67,6 +78,8 @@ export function useStreamProcessor<T>(): StreamProcessorResult<T> {
                 progress: data.progress,
                 current_analyst: data.current_analyst,
                 analyst_progress: data.analyst_progress,
+                node: data.node,
+                step: data.step,
               });
               setProgress({
                 stage: data.stage,
@@ -74,7 +87,17 @@ export function useStreamProcessor<T>(): StreamProcessorResult<T> {
                 progress: data.progress,
                 current_analyst: data.current_analyst,
                 analyst_progress: data.analyst_progress,
+                node: data.node,
+                step: data.step,
               });
+            } else if (data.type === 'intermediate') {
+              console.log('Intermediate result:', data);
+              const intermediateResult: IntermediateResult = {
+                node: data.node,
+                stage: data.stage,
+                messages: data.messages,
+              };
+              setIntermediateResults(prev => [...prev, intermediateResult]);
             } else if (data.type === 'result') {
               console.log('Final result received:', data.data);
               setResult(data.data);
@@ -101,6 +124,7 @@ export function useStreamProcessor<T>(): StreamProcessorResult<T> {
     progress,
     result,
     error,
+    intermediateResults,
     processStream,
   };
 } 

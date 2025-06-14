@@ -85,7 +85,7 @@ def run_hedge_fund(
         }
 
         # Initialize state
-        state = {
+        initial_state = {
             "messages": [
                 HumanMessage(
                     content="Make trading decisions based on the provided data.",
@@ -105,63 +105,92 @@ def run_hedge_fund(
             },
         }
 
-        # Yield progress for each analyst
-        for i, analyst in enumerate(selected_analysts):
-            logger.debug(f"Running {analyst} analysis")
-            yield {
-                "type": "progress",
-                "stage": "analysis",
-                "message": f"Running {analyst} analysis...",
-                "progress": int(20 + (i * 20 / len(selected_analysts))),
-                "current_analyst": analyst,
-                "analyst_progress": f"{i + 1}/{len(selected_analysts)}"
-            }
-            # Run the analyst
-            state = agent.invoke(state)
-            yield {
-                "type": "progress",
-                "stage": "analysis",
-                "message": f"Completed {analyst} analysis",
-                "progress": int(40 + (i * 20 / len(selected_analysts))),
-                "current_analyst": analyst,
-                "analyst_progress": f"{i + 1}/{len(selected_analysts)}"
-            }
+        # Use LangGraph streaming instead of blocking invoke
+        logger.debug("Starting streaming execution")
+        final_state = None
+        current_node = None
+        step_count = 0
+        total_steps = len(selected_analysts) + 2  # analysts + risk + portfolio management
+        
+        # Stream the workflow execution
+        for chunk in agent.stream(initial_state, {"recursion_limit": 50}):
+            step_count += 1
+            logger.debug(f"Received streaming chunk: {list(chunk.keys())}")
+            
+            # Extract the current node name and state
+            for node_name, node_state in chunk.items():
+                if node_name == "__start__":
+                    continue
+                    
+                current_node = node_name
+                final_state = node_state
+                
+                # Calculate progress based on node execution
+                if "agent" in node_name and node_name != "risk_management_agent" and node_name != "portfolio_management_agent":
+                    # This is an analyst agent
+                    analyst_name = node_name.replace("_agent", "").replace("_", " ").title()
+                    progress_percent = int(10 + (step_count * 60 / total_steps))
+                    
+                    yield {
+                        "type": "progress",
+                        "stage": "analysis",
+                        "message": f"Running {analyst_name} analysis...",
+                        "progress": progress_percent,
+                        "current_analyst": analyst_name,
+                        "node": node_name,
+                        "step": step_count
+                    }
+                    
+                elif node_name == "risk_management_agent":
+                    yield {
+                        "type": "progress", 
+                        "stage": "risk_management",
+                        "message": "Running risk management...",
+                        "progress": 75,
+                        "node": node_name,
+                        "step": step_count
+                    }
+                    
+                elif node_name == "portfolio_management_agent":
+                    yield {
+                        "type": "progress",
+                        "stage": "portfolio_management", 
+                        "message": "Running portfolio management...",
+                        "progress": 90,
+                        "node": node_name,
+                        "step": step_count
+                    }
+                
+                # Yield intermediate results if show_reasoning is enabled
+                if show_reasoning and "messages" in node_state:
+                    yield {
+                        "type": "intermediate",
+                        "node": node_name,
+                        "stage": current_node.replace("_agent", "").replace("_", " ").title(),
+                        "messages": [msg.content if hasattr(msg, 'content') else str(msg) 
+                                   for msg in node_state["messages"][-1:]]  # Only latest message
+                    }
 
-        # Run risk management
-        logger.debug("Running risk management")
+        # Yield completion progress  
         yield {
             "type": "progress",
-            "stage": "risk_management",
-            "message": "Running risk management...",
-            "progress": 60
+            "stage": "completion",
+            "message": "Analysis completed",
+            "progress": 100
         }
-        state = agent.invoke(state)
-        yield {
-            "type": "progress",
-            "stage": "risk_management",
-            "message": "Completed risk management",
-            "progress": 80
-        }
-
-        # Run portfolio management
-        logger.debug("Running portfolio management")
-        yield {
-            "type": "progress",
-            "stage": "portfolio_management",
-            "message": "Running portfolio management...",
-            "progress": 90
-        }
-        state = agent.invoke(state)
         
         # Yield final results
-        logger.debug("Yielding final results")
-        yield {
-            "type": "result",
-            "data": {
-                "decisions": parse_hedge_fund_response(state["messages"][-1].content),
-                "analyst_signals": state["data"]["analyst_signals"],
+        if final_state:
+            logger.debug("Yielding final results")
+            yield {
+                "type": "result",
+                "data": {
+                    "decisions": parse_hedge_fund_response(final_state["messages"][-1].content),
+                    "analyst_signals": final_state["data"]["analyst_signals"],
+                }
             }
-        }
+        else:
+            raise Exception("No final state received from workflow execution")
 
     except Exception as e:
         logger.error(f"Error in hedge fund analysis: {str(e)}", exc_info=True)
