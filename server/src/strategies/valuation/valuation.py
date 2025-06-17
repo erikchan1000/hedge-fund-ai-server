@@ -360,4 +360,4 @@ def calculate_residual_income_value(
     pv_term = term_ri / (1 + cost_of_equity) ** num_years
 
     intrinsic = book_val + pv_ri + pv_term
-    return intrinsic * 0.8  # 20% margin of safety
+    return intrinsic * 0.8  # 20% margin of safety 

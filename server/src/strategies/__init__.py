@@ -1,0 +1,1 @@
+"""Trading strategies package for the hedge fund system.""" 
