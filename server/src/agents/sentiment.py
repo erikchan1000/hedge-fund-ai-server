@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import json
 
-from tools.api import get_insider_trades, get_company_news
+from external.clients.api import get_insider_trades, get_company_news
 
 
 ##### Sentiment Agent #####

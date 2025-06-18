@@ -3,7 +3,7 @@ from graph.state import AgentState, show_agent_reasoning
 from utils.progress import progress
 import json
 
-from tools.api import get_financial_metrics
+from external.clients.api import get_financial_metrics
 
 
 ##### Fundamental Agent #####
@@ -156,4 +156,4 @@ def fundamentals_agent(state: AgentState):
     return {
         "messages": [message],
         "data": data,
-    }
+    } 

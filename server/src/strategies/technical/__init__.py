@@ -1,1 +1,2 @@
-"""Technical analysis strategies.""" 
+"""Technical analysis strategies."""
+from .technicals import *
