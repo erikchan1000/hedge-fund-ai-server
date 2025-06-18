@@ -8,7 +8,7 @@ from models.dto.responses import AnalysisProgressDTO, AnalysisResultDTO
 from models.domain.portfolio import Portfolio
 from services.workflow_service import WorkflowService
 from services.validation_service import ValidationService
-from core.exceptions import ValidationError, BusinessLogicError
+from core.exceptions import ValidationError
 
 logger = logging.getLogger(__name__)
 
