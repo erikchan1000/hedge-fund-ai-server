@@ -4,6 +4,7 @@ import logging
 
 from models.dto.requests import AnalysisRequestDTO
 from core.exceptions import ValidationError
+from utils.analysts import ANALYST_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -101,20 +102,5 @@ class ValidationService:
         return all(c in allowed_chars for c in ticker.upper())
     
     def _get_valid_analysts(self) -> List[str]:
-        """Get list of valid analyst names."""
-        # This could be loaded from configuration or database
-        return [
-            "fundamentals",
-            "technicals",
-            "sentiment",
-            "valuation",
-            "warren_buffett",
-            "peter_lynch",
-            "ben_graham",
-            "charlie_munger",
-            "phil_fisher",
-            "bill_ackman",
-            "cathie_wood",
-            "michael_burry",
-            "stanley_druckenmiller"
-        ] 
+        """Get list of valid analyst names from ANALYST_CONFIG."""
+        return list(ANALYST_CONFIG.keys()) 
