@@ -20,12 +20,23 @@ class PolygonClient:
             raise ValueError("POLYGON_API_KEY environment variable is not set")
         
         self.client = RESTClient(api_key=self.api_key)
-        self.rate_limit = 200  # requests per minute for free tier
+        self.rate_limit = 50  # More conservative: 50 requests per minute
         self.requests = []
+        self.last_request_time = None
         
     def _wait_for_rate_limit(self):
-        """Implement rate limiting logic."""
+        """Implement conservative rate limiting logic."""
         now = datetime.now()
+        
+        # Always wait at least 2 seconds between requests to be conservative
+        if self.last_request_time:
+            time_since_last = (now - self.last_request_time).total_seconds()
+            if time_since_last < 2.0:
+                wait_time = 2.0 - time_since_last
+                logger.debug(f"Rate limiting: waiting {wait_time:.2f} seconds...")
+                time.sleep(wait_time)
+                now = datetime.now()
+        
         # Remove requests older than 1 minute
         self.requests = [req_time for req_time in self.requests 
                         if now - req_time < timedelta(minutes=1)]
@@ -33,27 +44,53 @@ class PolygonClient:
         if len(self.requests) >= self.rate_limit:
             # Calculate time to wait
             oldest_request = self.requests[0]
-            wait_time = 60 - (now - oldest_request).total_seconds()
+            wait_time = 60 - (now - oldest_request).total_seconds() + 5  # Add 5 second buffer
             if wait_time > 0:
-                logger.info(f"Rate limit reached, waiting {wait_time} seconds...")
+                logger.info(f"Rate limit reached, waiting {wait_time:.2f} seconds...")
                 time.sleep(wait_time)
                 self.requests = []
+                now = datetime.now()
         
         self.requests.append(now)
+        self.last_request_time = now
+    
+    def _execute_with_retry(self, func, *args, max_retries=3, **kwargs):
+        """Execute a function with exponential backoff retry on rate limit errors."""
+        for attempt in range(max_retries + 1):
+            try:
+                self._wait_for_rate_limit()
+                return func(*args, **kwargs)
+            except Exception as e:
+                error_str = str(e).lower()
+                if "429" in error_str or "too many" in error_str or "rate limit" in error_str:
+                    if attempt < max_retries:
+                        # Exponential backoff: 5, 10, 20 seconds
+                        wait_time = 5 * (2 ** attempt)
+                        logger.warning(f"Rate limit hit (attempt {attempt + 1}/{max_retries + 1}), "
+                                     f"waiting {wait_time} seconds before retry...")
+                        time.sleep(wait_time)
+                        # Clear request history to reset rate limiting
+                        self.requests = []
+                        continue
+                    else:
+                        logger.error(f"Max retries exceeded due to rate limiting: {str(e)}")
+                        raise
+                else:
+                    # Non-rate-limit error, don't retry
+                    raise
     
     def get_stock_price(self, symbol: str, start_date: str, end_date: str) -> Dict[str, Any]:
         """Get historical stock prices using aggregates (bars)."""
-        self._wait_for_rate_limit()
-        
         try:
             # Get daily aggregates
-            aggs = list(self.client.list_aggs(
+            aggs = list(self._execute_with_retry(
+                self.client.list_aggs,
                 ticker=symbol,
                 multiplier=1,
                 timespan="day",
                 from_=start_date,
                 to=end_date,
-                limit=50000
+                limit=50
             ))
             
             if not aggs:
@@ -92,10 +129,11 @@ class PolygonClient:
     
     def get_company_profile(self, symbol: str) -> Dict[str, Any]:
         """Get company profile using ticker details."""
-        self._wait_for_rate_limit()
-        
         try:
-            ticker_details = self.client.get_ticker_details(symbol)
+            ticker_details = self._execute_with_retry(
+                self.client.get_ticker_details,
+                symbol
+            )
             
             # Handle address safely
             address_data = {}
@@ -130,22 +168,12 @@ class PolygonClient:
     
     def get_financial_statements(self, symbol: str, statement: str = "income") -> Dict[str, Any]:
         """Get financial statements."""
-        self._wait_for_rate_limit()
-        
         try:
-            # Map statement types
-            statement_type_map = {
-                "income": "income_statement",
-                "balance": "balance_sheet", 
-                "cash": "cash_flow_statement"
-            }
-            
-            financials_type = statement_type_map.get(statement, "income_statement")
-            
-            # Get financial data
-            financials = list(self.client.vx.list_stock_financials(
+            # Get financial data using the vX endpoint
+            financials = list(self._execute_with_retry(
+                self.client.vx.list_stock_financials,
                 ticker=symbol,
-                period_of_report_gte="2020-01-01",
+                period_of_report_date_gte="2020-01-01",
                 limit=10
             ))
             
@@ -155,12 +183,25 @@ class PolygonClient:
             # Convert to FinnHub format
             result = {"financials": []}
             for financial in financials:
-                result["financials"].append({
-                    "year": financial.period_of_report_date.year,
-                    "quarter": financial.fiscal_quarter,
-                    "period": financial.period_of_report_date.strftime("%Y-%m-%d"),
-                    "financials": financial.financials
-                })
+                # Convert Financials object to dictionary
+                financials_obj = getattr(financial, 'financials', None)
+                financials_dict = self._convert_financials_to_dict(financials_obj) if financials_obj else {}
+                
+                financial_data = {
+                    "year": getattr(financial, 'fiscal_year', None),
+                    "quarter": getattr(financial, 'fiscal_quarter', None),
+                    "period": getattr(financial, 'period_of_report_date', ''),
+                    "financials": financials_dict
+                }
+                
+                # Convert period date to string if it's a date object
+                if hasattr(financial, 'period_of_report_date') and financial.period_of_report_date:
+                    try:
+                        financial_data["period"] = financial.period_of_report_date.strftime("%Y-%m-%d")
+                    except:
+                        financial_data["period"] = str(financial.period_of_report_date)
+                
+                result["financials"].append(financial_data)
             
             return result
             
@@ -168,18 +209,146 @@ class PolygonClient:
             logger.error(f"Error getting financial statements for {symbol}: {str(e)}")
             return {"financials": []}
     
-    def get_basic_financials(self, symbol: str, period: str = "ttm", limit: int = 10) -> Dict[str, Any]:
-        """Get basic financial metrics."""
-        self._wait_for_rate_limit()
+    def _extract_datapoint_value(self, datapoint) -> Optional[float]:
+        """Extract value from a Polygon DataPoint object."""
+        if datapoint is None:
+            return None
+        
+        # Handle DataPoint objects
+        if hasattr(datapoint, 'value'):
+            value = getattr(datapoint, 'value', None)
+            if value is not None and isinstance(value, (int, float)):
+                return float(value)
+        
+        return None
+    
+    def _convert_financials_to_dict(self, financials_obj) -> Dict[str, Any]:
+        """Convert Polygon Financials object to dictionary format with derived metrics."""
+        result = {}
+        
+        if not financials_obj:
+            return result
+        
+        # Process each financial statement section
+        sections = ['balance_sheet', 'income_statement', 'cash_flow_statement', 'comprehensive_income']
+        
+        for section_name in sections:
+            section_obj = getattr(financials_obj, section_name, None)
+            if section_obj:
+                # Get all attributes of the section object
+                for attr_name in dir(section_obj):
+                    if not attr_name.startswith('_'):  # Skip private attributes
+                        attr_value = getattr(section_obj, attr_name, None)
+                        
+                        # Try to extract value from DataPoint
+                        extracted_value = self._extract_datapoint_value(attr_value)
+                        if extracted_value is not None:
+                            # Create a meaningful key name
+                            key = f"{section_name}_{attr_name}"
+                            result[key] = extracted_value
+        
+        # Calculate derived financial metrics
+        derived_metrics = self._calculate_derived_metrics(result)
+        result.update(derived_metrics)
+        
+        return result
+    
+    def _calculate_derived_metrics(self, financial_data: Dict[str, float]) -> Dict[str, float]:
+        """Calculate common financial ratios and metrics from raw financial data."""
+        metrics = {}
         
         try:
-            # Get ticker details for basic metrics
-            ticker_details = self.client.get_ticker_details(symbol)
+            # Helper function to safely get values
+            def safe_get(key: str) -> Optional[float]:
+                value = financial_data.get(key)
+                return value if value is not None and value != 0 else None
             
-            # Get financial data
-            financials = list(self.client.vx.list_stock_financials(
+            # Get key financial statement items
+            revenues = safe_get('income_statement_revenues')
+            gross_profit = safe_get('income_statement_gross_profit')
+            operating_income = safe_get('income_statement_operating_income_loss')
+            net_income = safe_get('income_statement_net_income_loss')
+            total_assets = safe_get('balance_sheet_assets')
+            current_assets = safe_get('balance_sheet_current_assets')
+            current_liabilities = safe_get('balance_sheet_current_liabilities')
+            total_liabilities = safe_get('balance_sheet_liabilities')
+            total_equity = safe_get('balance_sheet_equity')
+            long_term_debt = safe_get('balance_sheet_long_term_debt')
+            basic_shares = safe_get('income_statement_basic_average_shares')
+            eps_basic = safe_get('income_statement_basic_earnings_per_share')
+            eps_diluted = safe_get('income_statement_diluted_earnings_per_share')
+            
+            # Profitability Ratios
+            if revenues and gross_profit:
+                metrics['gross_margin'] = gross_profit / revenues
+            
+            if revenues and operating_income:
+                metrics['operating_margin'] = operating_income / revenues
+            
+            if revenues and net_income:
+                metrics['net_margin'] = net_income / revenues
+            
+            if net_income and total_equity:
+                metrics['return_on_equity'] = net_income / total_equity
+            
+            if net_income and total_assets:
+                metrics['return_on_assets'] = net_income / total_assets
+            
+            # Liquidity Ratios
+            if current_assets and current_liabilities:
+                metrics['current_ratio'] = current_assets / current_liabilities
+            
+            # Leverage Ratios
+            if long_term_debt and total_equity:
+                metrics['debt_to_equity'] = long_term_debt / total_equity
+            
+            if total_liabilities and total_assets:
+                metrics['debt_to_assets'] = total_liabilities / total_assets
+            
+            if total_equity and total_assets:
+                metrics['equity_ratio'] = total_equity / total_assets
+            
+            # Per Share Metrics
+            if revenues and basic_shares and basic_shares != 0:
+                # Convert shares to positive value if negative (some companies report as negative)
+                shares = abs(basic_shares)
+                metrics['revenue_per_share'] = revenues / shares
+            
+            if total_equity and basic_shares and basic_shares != 0:
+                shares = abs(basic_shares)
+                metrics['book_value_per_share'] = total_equity / shares
+            
+            # Efficiency Ratios
+            if revenues and total_assets:
+                metrics['asset_turnover'] = revenues / total_assets
+            
+            # Include EPS if available
+            if eps_basic is not None:
+                metrics['earnings_per_share_basic'] = eps_basic
+            
+            if eps_diluted is not None:
+                metrics['earnings_per_share_diluted'] = eps_diluted
+            
+        except (ZeroDivisionError, TypeError) as e:
+            logger.debug(f"Error calculating derived metrics: {e}")
+        
+        return metrics
+
+    def get_basic_financials(self, symbol: str, period: str = "ttm", limit: int = 10) -> Dict[str, Any]:
+        """Get basic financial metrics."""
+        try:
+            # Get ticker details for basic metrics
+            ticker_details = self._execute_with_retry(
+                self.client.get_ticker_details,
+                symbol
+            )
+            # get last year date
+            last_year_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+            # Get financial data using the vX endpoint
+            financials = list(self._execute_with_retry(
+                self.client.vx.list_stock_financials,
                 ticker=symbol,
-                period_of_report_gte="2020-01-01",
+                period_of_report_date_gte=last_year_date,
                 limit=limit
             ))
             
@@ -188,30 +357,44 @@ class PolygonClient:
             
             # Add basic metrics from ticker details
             if ticker_details:
-                metrics["marketCapitalization"] = ticker_details.market_cap
-                metrics["shareOutstanding"] = ticker_details.share_class_shares_outstanding
+                metrics["marketCapitalization"] = getattr(ticker_details, 'market_cap', None)
+                metrics["shareOutstanding"] = getattr(ticker_details, 'share_class_shares_outstanding', None)
                 
             # Process financial data
             for financial in financials:
-                if financial.financials:
-                    # Determine period type
-                    period_key = "quarterly" if financial.fiscal_quarter else "annual"
+                financial_data = getattr(financial, 'financials', None)
+                if financial_data:
+                    # Convert Financials object to dictionary
+                    financial_dict = self._convert_financials_to_dict(financial_data)
                     
-                    # Add metrics with period suffix
-                    suffix = "TTM" if period.lower() == "ttm" else "Annual"
-                    
-                    for key, value in financial.financials.items():
-                        if isinstance(value, (int, float)):
-                            metric_key = f"{key}{suffix}"
-                            metrics[metric_key] = value
-                            
-                            # Add to series
-                            if key not in series[period_key]:
-                                series[period_key][key] = []
-                            series[period_key][key].append({
-                                "period": financial.period_of_report_date.strftime("%Y-%m-%d"),
-                                "v": value
-                            })
+                    if financial_dict:
+                        # Determine period type
+                        fiscal_quarter = getattr(financial, 'fiscal_quarter', None)
+                        period_key = "quarterly" if fiscal_quarter else "annual"
+                        
+                        # Add metrics with period suffix
+                        suffix = "TTM" if period.lower() == "ttm" else "Annual"
+                        
+                        for key, value in financial_dict.items():
+                            if isinstance(value, (int, float)) and value is not None:
+                                metric_key = f"{key}{suffix}"
+                                metrics[metric_key] = value
+                                
+                                # Add to series
+                                if key not in series[period_key]:
+                                    series[period_key][key] = []
+                                
+                                # Get period date safely
+                                period_date = getattr(financial, 'period_of_report_date', '')
+                                if hasattr(period_date, 'strftime'):
+                                    period_str = period_date.strftime("%Y-%m-%d")
+                                else:
+                                    period_str = str(period_date)
+                                
+                                series[period_key][key].append({
+                                    "period": period_str,
+                                    "v": value
+                                })
             
             return {
                 "metric": metrics,
@@ -223,41 +406,59 @@ class PolygonClient:
             return {"metric": {}, "series": {}}
     
     def get_insider_transactions(self, symbol: str, from_date: str = None, to_date: str = None) -> Dict[str, Any]:
-        """Get insider transactions."""
+        """Get insider transactions - Note: Limited availability in Polygon.io API."""
         self._wait_for_rate_limit()
         
         try:
-            # Build query parameters
-            params = {}
-            if from_date:
-                params["filing_date.gte"] = from_date
-            if to_date:
-                params["filing_date.lte"] = to_date
+            # Note: Insider transactions may not be available in all Polygon.io plans
+            # This is a placeholder implementation
+            logger.warning(f"Insider transactions may not be available for {symbol} on your Polygon.io plan")
             
-            # Get insider transactions
-            insider_transactions = list(self.client.vx.list_insider_transactions(
-                ticker=symbol,
-                limit=1000,
-                **params
-            ))
-            
-            # Convert to FinnHub format
-            transactions = []
-            for transaction in insider_transactions:
-                transactions.append({
-                    "symbol": symbol,
-                    "name": transaction.owner_name,
-                    "title": transaction.owner_title,
-                    "transactionDate": transaction.transaction_date.strftime("%Y-%m-%d"),
-                    "transactionCode": transaction.transaction_code,
-                    "transactionShares": transaction.transaction_shares,
-                    "transactionPrice": transaction.transaction_price_per_share,
-                    "change": transaction.transaction_shares,
-                    "price": transaction.transaction_price_per_share,
-                    "filingDate": transaction.filing_date.strftime("%Y-%m-%d")
-                })
-            
-            return {"data": transactions}
+            try:
+                # Attempt to get insider transactions if available
+                insider_transactions = list(self.client.vx.list_insider_transactions(
+                    ticker=symbol,
+                    filing_date_gte=from_date,
+                    filing_date_lte=to_date,
+                    limit=1000
+                ))
+                
+                # Convert to FinnHub format
+                transactions = []
+                for transaction in insider_transactions:
+                    # Handle dates safely
+                    transaction_date = getattr(transaction, 'transaction_date', '')
+                    filing_date = getattr(transaction, 'filing_date', '')
+                    
+                    if hasattr(transaction_date, 'strftime'):
+                        transaction_date_str = transaction_date.strftime("%Y-%m-%d")
+                    else:
+                        transaction_date_str = str(transaction_date)
+                    
+                    if hasattr(filing_date, 'strftime'):
+                        filing_date_str = filing_date.strftime("%Y-%m-%d")
+                    else:
+                        filing_date_str = str(filing_date)
+                    
+                    transactions.append({
+                        "symbol": symbol,
+                        "name": getattr(transaction, 'owner_name', ''),
+                        "title": getattr(transaction, 'owner_title', ''),
+                        "transactionDate": transaction_date_str,
+                        "transactionCode": getattr(transaction, 'transaction_code', ''),
+                        "transactionShares": getattr(transaction, 'transaction_shares', 0),
+                        "transactionPrice": getattr(transaction, 'transaction_price_per_share', 0),
+                        "change": getattr(transaction, 'transaction_shares', 0),
+                        "price": getattr(transaction, 'transaction_price_per_share', 0),
+                        "filingDate": filing_date_str
+                    })
+                
+                return {"data": transactions}
+                
+            except AttributeError:
+                # Method doesn't exist
+                logger.warning(f"Insider transactions endpoint not available in Polygon.io API")
+                return {"data": []}
             
         except Exception as e:
             logger.error(f"Error getting insider transactions for {symbol}: {str(e)}")
@@ -268,7 +469,7 @@ class PolygonClient:
         self._wait_for_rate_limit()
         
         try:
-            # Get news
+            # Get news using correct method name
             news_items = list(self.client.list_ticker_news(
                 ticker=symbol,
                 published_utc_gte=start_date,
@@ -279,16 +480,29 @@ class PolygonClient:
             # Convert to FinnHub format
             news = []
             for item in news_items:
+                # Handle publisher safely
+                publisher_name = ""
+                if hasattr(item, 'publisher') and item.publisher:
+                    publisher_name = getattr(item.publisher, 'name', '') if hasattr(item.publisher, 'name') else str(item.publisher)
+                
+                # Handle published timestamp
+                datetime_timestamp = 0
+                if hasattr(item, 'published_utc') and item.published_utc:
+                    try:
+                        datetime_timestamp = int(item.published_utc.timestamp())
+                    except:
+                        datetime_timestamp = 0
+                
                 news.append({
-                    "category": item.category,
-                    "datetime": int(item.published_utc.timestamp()),
-                    "headline": item.title,
-                    "id": item.id,
-                    "image": item.image_url,
+                    "category": getattr(item, 'category', ''),
+                    "datetime": datetime_timestamp,
+                    "headline": getattr(item, 'title', ''),
+                    "id": getattr(item, 'id', ''),
+                    "image": getattr(item, 'image_url', ''),
                     "related": symbol,
-                    "source": item.publisher.name if item.publisher else "",
-                    "summary": item.description,
-                    "url": item.article_url,
+                    "source": publisher_name,
+                    "summary": getattr(item, 'description', ''),
+                    "url": getattr(item, 'article_url', ''),
                     "sentiment": 0  # Polygon doesn't provide sentiment
                 })
             
@@ -303,25 +517,46 @@ class PolygonClient:
         self._wait_for_rate_limit()
         
         try:
-            # Get last quote
-            quote = self.client.get_last_quote(symbol)
-            
-            # Get last trade for additional data
-            trade = self.client.get_last_trade(symbol)
+            # Get last trade for current price
+            trade = None
+            try:
+                trade = self.client.get_last_trade(symbol)
+            except Exception as e:
+                logger.warning(f"Could not get last trade for {symbol}: {str(e)}")
             
             # Get ticker details for market cap
-            ticker_details = self.client.get_ticker_details(symbol)
+            ticker_details = None
+            try:
+                ticker_details = self.client.get_ticker_details(symbol)
+            except Exception as e:
+                logger.warning(f"Could not get ticker details for {symbol}: {str(e)}")
+            
+            # Build response in FinnHub format
+            current_price = None
+            timestamp = None
+            market_cap = None
+            
+            if trade:
+                current_price = getattr(trade, 'price', None)
+                # Convert nanosecond timestamp to seconds
+                if hasattr(trade, 'participant_timestamp'):
+                    timestamp = int(getattr(trade, 'participant_timestamp', 0) / 1000000000)
+                elif hasattr(trade, 'timestamp'):
+                    timestamp = int(getattr(trade, 'timestamp', 0) / 1000000000)
+            
+            if ticker_details:
+                market_cap = getattr(ticker_details, 'market_cap', None)
             
             return {
-                "c": trade.price if trade else None,  # current price
-                "h": None,  # high price of the day
-                "l": None,  # low price of the day
-                "o": None,  # open price of the day
-                "pc": None,  # previous close price
-                "t": int(trade.participant_timestamp / 1000000) if trade else None,  # timestamp
-                "dp": None,  # change
-                "d": None,  # change percent
-                "marketCap": ticker_details.market_cap if ticker_details else None
+                "c": current_price,  # current price
+                "h": None,  # high price of the day (not available from this endpoint)
+                "l": None,  # low price of the day (not available from this endpoint)
+                "o": None,  # open price of the day (not available from this endpoint)
+                "pc": None,  # previous close price (not available from this endpoint)
+                "t": timestamp,  # timestamp
+                "dp": None,  # change (not available from this endpoint)
+                "d": None,  # change percent (not available from this endpoint)
+                "marketCap": market_cap
             }
             
         except Exception as e:
@@ -330,69 +565,47 @@ class PolygonClient:
     
     def get_technical_indicators(self, symbol: str, indicator: str, 
                                start_date: str, end_date: str) -> Dict[str, Any]:
-        """Get technical indicators."""
+        """Get technical indicators - Note: Limited support in Polygon.io API."""
         self._wait_for_rate_limit()
         
         try:
-            # Get technical indicators
-            indicators = list(self.client.get_technical_indicator(
-                ticker=symbol,
-                indicator_name=indicator,
-                timestamp_gte=start_date,
-                timestamp_lte=end_date
-            ))
-            
-            # Convert to FinnHub format
-            result = {
-                "s": "ok" if indicators else "no_data",
+            # Polygon.io has limited technical indicators support
+            # For now, return a placeholder response
+            logger.warning(f"Technical indicators not fully supported in Polygon.io API for {symbol}")
+            return {
+                "s": "no_data",
                 indicator: []
             }
-            
-            for ind in indicators:
-                result[indicator].append(ind.value)
-            
-            return result
             
         except Exception as e:
             logger.error(f"Error getting technical indicators for {symbol}: {str(e)}")
             return {"s": "error"}
     
-    def get_reported_financials(self, symbol: str, freq: str = "annual") -> Dict[str, Any]:
-        """Get historical reported financials."""
-        self._wait_for_rate_limit()
-        
+    def get_reported_financials(self, symbol: str, freq: str = "annual") -> List[Dict[str, Any]]:
+        """Get historical reported financials - returns raw Polygon.io response."""
         try:
-            # Get financial data
-            financials = list(self.client.vx.list_stock_financials(
+            # Get financial data using the vX endpoint
+            financials = list(self._execute_with_retry(
+                self.client.vx.list_stock_financials,
                 ticker=symbol,
-                period_of_report_gte="2020-01-01",
+                period_of_report_date_gte="2020-01-01",
                 limit=20
             ))
             
-            # Filter by frequency
+            # Filter by frequency and return raw response
             filtered_financials = []
             for financial in financials:
-                if freq == "annual" and financial.fiscal_quarter is None:
+                fiscal_quarter = getattr(financial, 'fiscal_quarter', None)
+                if freq == "annual" and fiscal_quarter is None:
                     filtered_financials.append(financial)
-                elif freq == "quarterly" and financial.fiscal_quarter is not None:
+                elif freq == "quarterly" and fiscal_quarter is not None:
                     filtered_financials.append(financial)
             
-            # Convert to FinnHub format
-            result = {"data": []}
-            for financial in filtered_financials:
-                result["data"].append({
-                    "symbol": symbol,
-                    "year": financial.fiscal_year,
-                    "quarter": financial.fiscal_quarter,
-                    "period": financial.period_of_report_date.strftime("%Y-%m-%d"),
-                    "report": financial.financials
-                })
-            
-            return result
+            return filtered_financials
             
         except Exception as e:
             logger.error(f"Error getting reported financials for {symbol}: {str(e)}")
-            return {"data": []}
+            return []
     
     def get_income_statement(self, symbol: str, freq: str = "annual") -> Dict[str, Any]:
         """Get historical income statements."""
