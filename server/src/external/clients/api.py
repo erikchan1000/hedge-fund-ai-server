@@ -19,7 +19,7 @@ from data.models import (
     InsiderTradeResponse,
     CompanyFactsResponse,
 )
-from external.clients.finnhub_client import FinnHubClient
+from external.clients.polygon_client import PolygonClient
 from external.clients.alpaca_client import AlpacaClient
 from external.clients.financial_calculator import FinancialCalculator
 from external.clients.field_adapters import FieldMappingService
@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 _cache = get_cache()
 
 
-finnhub_client = FinnHubClient()
+polygon_client = PolygonClient()
 alpaca_client = AlpacaClient()
 financial_calculator = FinancialCalculator()
 field_mapping_service = FieldMappingService()
@@ -93,10 +93,10 @@ def get_financial_metrics(
 
     try:
         
-        profile = finnhub_client.get_company_profile(ticker)
+        profile = polygon_client.get_company_profile(ticker)
 
         
-        metrics_data = finnhub_client.get_basic_financials(ticker, period=period, limit=limit)
+        metrics_data = polygon_client.get_basic_financials(ticker, period=period, limit=limit)
 
         
         metric = metrics_data.get("metric", {})
@@ -379,7 +379,7 @@ def get_insider_trades(
 
     try:
         
-        data = finnhub_client.get_insider_transactions(
+        data = polygon_client.get_insider_transactions(
             ticker,
             from_date=start_date,
             to_date=end_date
@@ -439,7 +439,7 @@ def get_company_news(
 
     try:
         
-        data = finnhub_client.get_company_news(ticker, start_date or "2020-01-01", end_date)
+        data = polygon_client.get_company_news(ticker, start_date or "2020-01-01", end_date)
 
         
         news_items = []
@@ -472,7 +472,7 @@ def get_market_cap(ticker: str, end_date: str) -> Optional[float]:
     """Fetch market cap from FinnHub API."""
     try:
         
-        quote = finnhub_client.get_quote(ticker)
+        quote = polygon_client.get_quote(ticker)
         return quote.get("marketCap")
     except Exception as e:
         logger.error(f"Error fetching market cap for {ticker}: {str(e)}")
@@ -501,9 +501,156 @@ def search_line_items(
     period: str = "ttm",
     limit: int = 10
 ) -> List[LineItem]:
-    """Search for line items from cache or API."""
-    # Implementation would continue with the rest of the original function
-    pass
+    """Search for line items from cache or API using enhanced financial calculator with reported financials."""
+    
+    # Check cache first
+    if cached_data := _cache.get_line_items(ticker):
+        filtered_data = [LineItem(**item) for item in cached_data
+                        if item["report_period"] <= end_date and item.get("period", "ttm") == period]
+        filtered_data.sort(key=lambda x: x.report_period, reverse=True)
+        if filtered_data:
+            return filtered_data[:limit]
+
+    try:
+        logger.info(f"Searching line items for {ticker}: {line_items}")
+        
+        profile = polygon_client.get_company_profile(ticker)
+        
+        metrics_data = polygon_client.get_basic_financials(ticker, period=period, limit=limit)
+        metric = metrics_data.get("metric", {})
+        series = metrics_data.get("series", {})
+        
+        # Get reported financials for actual values (required)
+        try:
+            reported_financials = polygon_client.get_reported_financials(ticker, freq="annual")
+            logger.info(f"Retrieved reported financials for {ticker}: {len(reported_financials.get('data', []))} years")
+        except Exception as e:
+            logger.error(f"Failed to retrieve reported financials for {ticker}: {str(e)}")
+            raise Exception(f"Reported financials are required but could not be retrieved for {ticker}")
+        
+        if not reported_financials or "data" not in reported_financials or not reported_financials["data"]:
+            raise Exception(f"No reported financials data available for {ticker}")
+        
+        # Determine period suffix for field mappings
+        if period.lower() == "ttm":
+            period_suffix = "TTM"
+            series_key = "quarterly"
+        elif period.lower() in ["annual", "yearly"]:
+            period_suffix = "Annual" 
+            series_key = "annual"
+        else:
+            period_suffix = "TTM"
+            series_key = "quarterly"
+        
+        # Get field mappings using FieldMappingService
+        mappings = field_mapping_service.get_mappings_for_source("polygon", period_suffix)
+        
+        # Extract actual metrics using financial calculator with reported financials
+        calculated_mappings = financial_calculator.calculate_missing_metrics(
+            metric, period_suffix, reported_financials
+        )
+        
+        # Combine field mappings with calculated mappings
+        all_mappings = {**mappings, **calculated_mappings}
+        
+        logger.info(f"Available mappings for {ticker}: {list(all_mappings.keys())}")
+        logger.info(f"Calculated mappings: {list(calculated_mappings.keys())}")
+        
+        result = []
+        
+        # Process each requested line item
+        for line_item in line_items:
+            logger.info(f"Processing line item: {line_item}")
+            
+            # Try to get direct field mapping
+            field_name = all_mappings.get(line_item)
+            if field_name and field_name in metric:
+                value = metric[field_name]
+                if value is not None:
+                    result.append(LineItem(
+                        ticker=ticker,
+                        name=line_item,
+                        value=float(value),
+                        report_period=end_date,
+                        period=period,
+                        currency=profile.get("currency", "USD"),
+                        source="finnhub_direct"
+                    ))
+                    logger.info(f"  Found direct value for {line_item}: {value}")
+                    continue
+            
+            # Try series data for historical values
+            series_field = field_mapping_service.get_series_mapping("polygon", line_item, series_key)
+            if series_field and series_field in series.get(series_key, {}):
+                series_data = series[series_key][series_field]
+                if isinstance(series_data, list) and series_data:
+                    # Sort by period and take the most recent
+                    sorted_data = sorted(series_data, key=lambda x: x.get("period", ""), reverse=True)
+                    for period_data in sorted_data[:limit]:
+                        if isinstance(period_data, dict) and period_data.get("v") is not None:
+                            result.append(LineItem(
+                                ticker=ticker,
+                                name=line_item,
+                                value=float(period_data["v"]),
+                                report_period=period_data.get("period", end_date),
+                                period=period,
+                                currency=profile.get("currency", "USD"),
+                                source="finnhub_series"
+                            ))
+                            logger.info(f"  Found series value for {line_item}: {period_data['v']} ({period_data.get('period')})")
+                            break
+                    continue
+            
+            if line_item in ["outstanding_shares", "shares_outstanding"] and profile.get("shareOutstanding"):
+                result.append(LineItem(
+                    ticker=ticker,
+                    name=line_item,
+                    value=float(profile["shareOutstanding"]),
+                    report_period=end_date,
+                    period=period,
+                    currency=profile.get("currency", "USD"),
+                    source="finnhub_profile"
+                ))
+                logger.info(f"  Found shares outstanding from profile: {profile['shareOutstanding']}")
+                continue
+            
+            shares_outstanding = profile.get("shareOutstanding")
+            if shares_outstanding and line_item in ["revenue", "net_income", "operating_cash_flow"]:
+                per_share_field = None
+                if line_item == "revenue":
+                    per_share_field = f"revenuePerShare{period_suffix}"
+                elif line_item == "net_income" and f"epsBasicExclExtraItems{period_suffix}" in metric:
+                    per_share_field = f"epsBasicExclExtraItems{period_suffix}"
+                elif line_item == "operating_cash_flow":
+                    per_share_field = f"cashFlowPerShare{period_suffix}"
+                
+                if per_share_field and metric.get(per_share_field):
+                    calculated_value = metric[per_share_field] * shares_outstanding
+                    result.append(LineItem(
+                        ticker=ticker,
+                        name=line_item,
+                        value=float(calculated_value),
+                        report_period=end_date,
+                        period=period,
+                        currency=profile.get("currency", "USD"),
+                        source="finnhub_calculated"
+                    ))
+                    logger.info(f"  Calculated {line_item} from per-share data: {calculated_value}")
+                    continue
+            
+            logger.warning(f"  Could not find value for line item: {line_item}")
+        
+        result.sort(key=lambda x: x.report_period, reverse=True)
+        
+        if result:
+            _cache.set_line_items(ticker, [item.model_dump() for item in result])
+        
+        logger.info(f"Returning {len(result)} line items for {ticker}")
+        return result[:limit]
+        
+    except Exception as e:
+        logger.error(f"Error searching line items for {ticker}: {str(e)}")
+        raise
 
 def calculate_growth_rates(
     ticker: str,

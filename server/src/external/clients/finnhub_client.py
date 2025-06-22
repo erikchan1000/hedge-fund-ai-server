@@ -165,6 +165,13 @@ class FinnHubClient:
             "to": end_timestamp,
             "indicator": indicator
         })
+
+    def get_reported_financials(self, symbol: str, freq: str = "annual") -> Dict[str, Any]:
+        """Get historical reported financials."""
+        return self._make_request("stock/financial-reported", {
+            "symbol": symbol,
+            "freq": freq
+        })
     
     def get_income_statement(self, symbol: str, freq: str = "annual") -> Dict[str, Any]:
         """Get historical income statements."""

@@ -1,233 +1,266 @@
 import logging
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, List
 
 logger = logging.getLogger(__name__)
 
 class FinancialCalculator:
-    """Service for calculating missing financial metrics from available ratios and per-share data."""
+    """Service for extracting financial metrics from reported financials data."""
 
     def __init__(self):
-        # Industry average ratios for estimation
-        self.INDUSTRY_AVERAGES = {
-            "depreciation_as_pct_revenue": 0.05,  # 5% of revenue
-            "capex_as_pct_revenue": 0.04,         # 4% of revenue
-            "current_liabilities_as_pct_debt": 0.30,  # 30% of total debt
+        # GAAP concept mappings for reported financials
+        self.GAAP_MAPPINGS = {
+            "revenue": [
+                "us-gaap_RevenueFromContractWithCustomerExcludingAssessedTax",
+                "us-gaap_SalesRevenueNet", 
+                "us-gaap_Revenues"
+            ],
+            "net_income": ["us-gaap_NetIncomeLoss"],
+            "operating_cash_flow": ["us-gaap_NetCashProvidedByUsedInOperatingActivities"],
+            "capital_expenditure": [
+                "us-gaap_PaymentsToAcquirePropertyPlantAndEquipment",
+                "us-gaap_PaymentsToAcquireProductiveAssets"
+            ],
+            "depreciation_and_amortization": [
+                "us-gaap_DepreciationDepletionAndAmortization",
+                "us-gaap_DepreciationAmortizationAndAccretionNet"
+            ],
+            "current_assets": ["us-gaap_AssetsCurrent"],
+            "current_liabilities": ["us-gaap_LiabilitiesCurrent"],
+            "total_assets": ["us-gaap_Assets"],
+            "total_liabilities": ["us-gaap_Liabilities"],
+            "gross_profit": ["us-gaap_GrossProfit"],
+            "operating_income": ["us-gaap_OperatingIncomeLoss"],
+            "cost_of_goods_sold": ["us-gaap_CostOfGoodsAndServicesSold"],
+            "research_and_development": ["us-gaap_ResearchAndDevelopmentExpense"],
+            "selling_general_administrative": ["us-gaap_SellingGeneralAndAdministrativeExpense"],
+            "accounts_receivable": [
+                "us-gaap_AccountsReceivableNetCurrent",
+                "us-gaap_AccountsReceivableNet"
+            ],
+            "inventory": ["us-gaap_InventoryNet"],
+            "accounts_payable": ["us-gaap_AccountsPayableCurrent"],
+            "cash_and_equivalents": ["us-gaap_CashAndCashEquivalentsAtCarryingValue"],
+            "shares_outstanding": [
+                "us-gaap_WeightedAverageNumberOfSharesOutstandingBasic",
+                "us-gaap_CommonStockSharesOutstanding"
+            ],
+            "ebitda": ["us-gaap_EarningsBeforeInterestTaxesDepreciationAndAmortization"],
+            "ebit": ["us-gaap_OperatingIncomeLoss"],  # Operating income is essentially EBIT
+            "interest_expense": ["us-gaap_InterestExpense"],
+            "income_tax_expense": ["us-gaap_IncomeTaxExpenseBenefit"],
+            "free_cash_flow": None,  # Calculated as operating_cash_flow - capital_expenditure
+            "working_capital": None,  # Calculated as current_assets - current_liabilities
         }
 
-    def calculate_missing_metrics(self, metric: Dict[str, Any], period_suffix: str) -> Dict[str, str]:
+    def calculate_missing_metrics(self, metric: Dict[str, Any], period_suffix: str, 
+                                reported_financials: Dict[str, Any]) -> Dict[str, str]:
         """
-        Calculate missing financial metrics and return field mappings.
+        Extract financial metrics from reported financials data.
 
         Args:
-            metric: Dictionary of available financial metrics from API
-            period_suffix: Either "TTM" or "Annual"
+            metric: Dictionary to store calculated values
+            period_suffix: Either "TTM" or "Annual" 
+            reported_financials: Required reported financials data from get_reported_financials
 
         Returns:
-            Dictionary mapping line item names to calculated field names
+            Dictionary mapping line item names to field names in metric dict
         """
-        logger.info(f"FinancialCalculator: Starting calculation for period {period_suffix}")
-        calculated_mappings = {}
-        logger.info(f"metric = {metric}")
-        shares_outstanding = metric.get("shareOutstanding")
-        logger.info(f"FinancialCalculator: shares_outstanding = {shares_outstanding}")
+        logger.info(f"FinancialCalculator: Starting extraction for period {period_suffix}")
+        
+        if not reported_financials or "data" not in reported_financials or not reported_financials["data"]:
+            logger.error("FinancialCalculator: No reported financials data provided")
+            return {}
 
-        if period_suffix == "TTM":
-            calculated_mappings.update(self._calculate_ttm_metrics(metric, shares_outstanding))
-        elif period_suffix == "Annual":
-            calculated_mappings.update(self._calculate_annual_metrics(metric, shares_outstanding))
-
-        logger.info(f"FinancialCalculator: Final mappings = {calculated_mappings}")
-        return calculated_mappings
-
-    def _calculate_ttm_metrics(self, metric: Dict[str, Any], shares_outstanding: Optional[float]) -> Dict[str, str]:
-        """Calculate TTM-specific metrics."""
-        logger.info(f"FinancialCalculator: Starting TTM metrics calculation")
         mappings = {}
+        
+        # Get the most recent financial data
+        latest_financials = self._get_latest_financials(reported_financials["data"])
+        if not latest_financials:
+            logger.error("FinancialCalculator: No valid financial data found")
+            return {}
+            
+        logger.info(f"FinancialCalculator: Using reported financials from {latest_financials.get('year')}")
 
-        # Calculate free cash flow from EV/FCF ratio
-        enterprise_value = metric.get("enterpriseValue")
-        ev_fcf_ratio = metric.get("currentEv/freeCashFlowTTM")
-        logger.info(f"FinancialCalculator: enterprise_value = {enterprise_value}, ev_fcf_ratio = {ev_fcf_ratio}")
+        # Extract actual values from reported financials
+        mappings.update(self._extract_actual_metrics(metric, latest_financials, period_suffix))
 
-        if enterprise_value and ev_fcf_ratio and ev_fcf_ratio > 0:
-            calculated_fcf = enterprise_value / ev_fcf_ratio
-            metric["calculated_from_ev_fcf"] = calculated_fcf
-            mappings["free_cash_flow"] = "calculated_from_ev_fcf"
-            logger.info(f"  Calculated free cash flow from EV/FCF: {calculated_fcf}")
-        else:
-            logger.warning(f"  Cannot calculate free cash flow: EV={enterprise_value}, EV/FCF={ev_fcf_ratio}")
-
-        if shares_outstanding:
-            logger.info(f"FinancialCalculator: shares_outstanding available: {shares_outstanding}")
-
-            # Calculate net income from EPS
-            eps_ttm = metric.get("epsBasicExclExtraItemsTTM")
-            logger.info(f"FinancialCalculator: eps_ttm = {eps_ttm}")
-            if eps_ttm:
-                calculated_net_income = eps_ttm * shares_outstanding
-                metric["calculated_net_income_ttm"] = calculated_net_income
-                mappings["net_income"] = "calculated_net_income_ttm"
-                logger.info(f"  Calculated net income from EPS * shares: {calculated_net_income}")
-            else:
-                logger.warning(f"  Cannot calculate net income: EPS TTM not available")
-
-            # Calculate revenue from revenuePerShare
-            revenue_per_share = metric.get("revenuePerShareTTM")
-            logger.info(f"FinancialCalculator: revenue_per_share = {revenue_per_share}")
-            if revenue_per_share:
-                calculated_revenue = revenue_per_share * shares_outstanding
-                metric["calculated_revenue_ttm"] = calculated_revenue
-                mappings["revenue"] = "calculated_revenue_ttm"
-                logger.info(f"  Calculated revenue from revenuePerShare * shares: {calculated_revenue}")
-
-                # Estimate depreciation and amortization as % of revenue
-                estimated_da = calculated_revenue * self.INDUSTRY_AVERAGES["depreciation_as_pct_revenue"]
-                metric["estimated_da_ttm"] = estimated_da
-                mappings["depreciation_and_amortization"] = "estimated_da_ttm"
-                logger.info(f"  Estimated depreciation & amortization (5% of revenue): {estimated_da}")
-            else:
-                logger.warning(f"  Cannot calculate revenue: revenuePerShare TTM not available")
-
-            # Calculate operating cash flow from cashFlowPerShare
-            cash_flow_per_share = metric.get("cashFlowPerShareTTM")
-            logger.info(f"FinancialCalculator: cash_flow_per_share = {cash_flow_per_share}")
-            if cash_flow_per_share:
-                calculated_ocf = cash_flow_per_share * shares_outstanding
-                metric["calculated_operating_cf_ttm"] = calculated_ocf
-                mappings["operating_cash_flow"] = "calculated_operating_cf_ttm"
-                logger.info(f"  Calculated operating cash flow from cashFlowPerShare * shares: {calculated_ocf}")
-
-                # Calculate capital expenditure from OCF - FCF if both available
-                calculated_fcf = metric.get("calculated_from_ev_fcf")
-                if calculated_fcf:
-                    estimated_capex = calculated_ocf - calculated_fcf
-                    if self._is_reasonable_capex(estimated_capex, calculated_ocf):
-                        metric["estimated_capex_ttm"] = estimated_capex
-                        mappings["capital_expenditure"] = "estimated_capex_ttm"
-                        mappings["capital_expenditures"] = "estimated_capex_ttm"
-                        logger.info(f"  Estimated capital expenditure (OCF - FCF): {estimated_capex}")
-                    else:
-                        # Fall back to revenue-based estimate
-                        revenue = metric.get("calculated_revenue_ttm")
-                        if revenue:
-                            estimated_capex = revenue * self.INDUSTRY_AVERAGES["capex_as_pct_revenue"]
-                            metric["estimated_capex_revenue_ttm"] = estimated_capex
-                            mappings["capital_expenditure"] = "estimated_capex_revenue_ttm"
-                            mappings["capital_expenditures"] = "estimated_capex_revenue_ttm"
-                            logger.info(f"  Estimated capital expenditure (4% of revenue): {estimated_capex}")
-            else:
-                logger.warning(f"  Cannot calculate operating cash flow: cashFlowPerShare TTM not available")
-
-            # Estimate capital expenditure from revenue if OCF method didn't work
-            revenue = metric.get("calculated_revenue_ttm")
-            if revenue and "capital_expenditure" not in mappings:
-                estimated_capex = revenue * self.INDUSTRY_AVERAGES["capex_as_pct_revenue"]
-                metric["estimated_capex_revenue_ttm"] = estimated_capex
-                mappings["capital_expenditure"] = "estimated_capex_revenue_ttm"
-                mappings["capital_expenditures"] = "estimated_capex_revenue_ttm"
-                logger.info(f"  Estimated capital expenditure (4% of revenue): {estimated_capex}")
-        else:
-            logger.warning(f"FinancialCalculator: shares_outstanding not available, skipping per-share calculations")
-
-        # Estimate working capital using balance sheet ratios
-        working_capital = self._estimate_working_capital(metric, "TTM")
-        if working_capital is not None:
-            metric["calculated_working_capital_ttm"] = working_capital
-            mappings["working_capital"] = "calculated_working_capital_ttm"
-            logger.info(f"  Estimated working capital: {working_capital}")
-
-        logger.info(f"FinancialCalculator: TTM mappings = {mappings}")
+        logger.info(f"FinancialCalculator: Final mappings = {mappings}")
         return mappings
 
-    def _calculate_annual_metrics(self, metric: Dict[str, Any], shares_outstanding: Optional[float]) -> Dict[str, str]:
-        """Calculate Annual-specific metrics."""
-        mappings = {}
+    def _get_latest_financials(self, financial_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Get the most recent financial data from reported financials."""
+        if not financial_data:
+            return {}
+        
+        # Sort by year descending to get the latest
+        sorted_data = sorted(financial_data, key=lambda x: x.get("year", 0), reverse=True)
+        return sorted_data[0] if sorted_data else {}
 
-        if shares_outstanding:
-            # Calculate net income from EPS
-            eps_annual = metric.get("epsBasicExclExtraItemsAnnual")
-            if eps_annual:
-                calculated_net_income = eps_annual * shares_outstanding
-                metric["calculated_net_income_annual"] = calculated_net_income
-                mappings["net_income"] = "calculated_net_income_annual"
-                logger.info(f"  Calculated annual net income from EPS * shares: {calculated_net_income}")
-
-            # Calculate revenue from revenuePerShare
-            revenue_per_share = metric.get("revenuePerShareAnnual")
-            if revenue_per_share:
-                calculated_revenue = revenue_per_share * shares_outstanding
-                metric["calculated_revenue_annual"] = calculated_revenue
-                mappings["revenue"] = "calculated_revenue_annual"
-                logger.info(f"  Calculated annual revenue from revenuePerShare * shares: {calculated_revenue}")
-
-                # Estimate depreciation and amortization as % of revenue
-                estimated_da = calculated_revenue * self.INDUSTRY_AVERAGES["depreciation_as_pct_revenue"]
-                metric["estimated_da_annual"] = estimated_da
-                mappings["depreciation_and_amortization"] = "estimated_da_annual"
-                logger.info(f"  Estimated annual depreciation & amortization (5% of revenue): {estimated_da}")
-
-                # Estimate capital expenditure as % of revenue
-                estimated_capex = calculated_revenue * self.INDUSTRY_AVERAGES["capex_as_pct_revenue"]
-                metric["estimated_capex_annual"] = estimated_capex
-                mappings["capital_expenditure"] = "estimated_capex_annual"
-                mappings["capital_expenditures"] = "estimated_capex_annual"
-                logger.info(f"  Estimated annual capital expenditure (4% of revenue): {estimated_capex}")
-
-            # Calculate operating cash flow from cashFlowPerShare
-            cash_flow_per_share = metric.get("cashFlowPerShareAnnual")
-            if cash_flow_per_share:
-                calculated_ocf = cash_flow_per_share * shares_outstanding
-                metric["calculated_operating_cf_annual"] = calculated_ocf
-                mappings["operating_cash_flow"] = "calculated_operating_cf_annual"
-                logger.info(f"  Calculated annual operating cash flow from cashFlowPerShare * shares: {calculated_ocf}")
-
-        return mappings
-
-    def _estimate_working_capital(self, metric: Dict[str, Any], period_suffix: str) -> Optional[float]:
-        """
-        Estimate working capital using current ratio and balance sheet approximations.
-
-        This is a rough estimation and should be used only when direct data is unavailable.
-        """
-        current_ratio = metric.get("currentRatioAnnual") or metric.get("currentRatioQuarterly")
-        total_debt_to_equity = metric.get("totalDebt/totalEquityAnnual") or metric.get("totalDebt/totalEquityQuarterly")
-        market_cap = metric.get("marketCapitalization")
-        pb_ratio = metric.get("pbAnnual") or metric.get("pbQuarterly")
-
-        if not all([current_ratio, market_cap, pb_ratio]) or pb_ratio <= 0:
+    def _extract_value_from_financials(self, financials: Dict[str, Any], metric_type: str) -> float:
+        """Extract a specific metric value from reported financials."""
+        if not financials or "report" not in financials:
             return None
 
-        try:
-            # Estimate book value from market cap and P/B ratio
-            estimated_book_value = market_cap / pb_ratio
-
-            if total_debt_to_equity and total_debt_to_equity > 0:
-                # Estimate total debt
-                estimated_total_debt = total_debt_to_equity * estimated_book_value
-
-                # Rough approximation: current liabilities ≈ 30% of total debt
-                estimated_current_liabilities = estimated_total_debt * self.INDUSTRY_AVERAGES["current_liabilities_as_pct_debt"]
-
-                # Current assets = current ratio × current liabilities
-                estimated_current_assets = current_ratio * estimated_current_liabilities
-
-                # Working capital = current assets - current liabilities
-                working_capital = estimated_current_assets - estimated_current_liabilities
-
-                return working_capital
-        except (TypeError, ZeroDivisionError):
+        concepts = self.GAAP_MAPPINGS.get(metric_type, [])
+        if not concepts:
             return None
-
+        
+        # Search through all financial statement sections (bs, ic, cf)
+        for section_name in ["bs", "ic", "cf"]:
+            section = financials["report"].get(section_name, [])
+            for item in section:
+                if item.get("concept") in concepts:
+                    value = item.get("value")
+                    if value is not None:
+                        logger.info(f"Found {metric_type}: {value} from concept {item.get('concept')}")
+                        return float(value)
+        
         return None
 
-    def _is_reasonable_capex(self, capex: float, operating_cf: float) -> bool:
-        """
-        Check if calculated capex seems reasonable.
+    def _extract_actual_metrics(self, metric: Dict[str, Any], reported_financials: Dict[str, Any], 
+                              period_suffix: str) -> Dict[str, str]:
+        """Extract actual metrics from reported financials only."""
+        logger.info(f"FinancialCalculator: Extracting actual metrics for {period_suffix}")
+        mappings = {}
 
-        Capex should be positive and typically less than 50% of operating cash flow.
-        """
-        if capex <= 0:
-            return False
-        if operating_cf > 0 and capex > operating_cf * 0.5:
-            return False
-        return True 
+        actual_revenue = self._extract_value_from_financials(reported_financials, "revenue")
+        if actual_revenue is not None:
+            field_name = f"actual_revenue_{period_suffix.lower()}"
+            metric[field_name] = actual_revenue
+            mappings["revenue"] = field_name
+            logger.info(f"  Using actual revenue: {actual_revenue}")
+
+        actual_net_income = self._extract_value_from_financials(reported_financials, "net_income")
+        if actual_net_income is not None:
+            field_name = f"actual_net_income_{period_suffix.lower()}"
+            metric[field_name] = actual_net_income
+            mappings["net_income"] = field_name
+            logger.info(f"  Using actual net income: {actual_net_income}")
+
+        actual_ocf = self._extract_value_from_financials(reported_financials, "operating_cash_flow")
+        if actual_ocf is not None:
+            field_name = f"actual_operating_cf_{period_suffix.lower()}"
+            metric[field_name] = actual_ocf
+            mappings["operating_cash_flow"] = field_name
+            logger.info(f"  Using actual operating cash flow: {actual_ocf}")
+
+        actual_capex = self._extract_value_from_financials(reported_financials, "capital_expenditure")
+        if actual_capex is not None:
+            actual_capex = abs(actual_capex)
+            field_name = f"actual_capex_{period_suffix.lower()}"
+            metric[field_name] = actual_capex
+            mappings["capital_expenditure"] = field_name
+            mappings["capital_expenditures"] = field_name
+            logger.info(f"  Using actual capital expenditure: {actual_capex}")
+
+        actual_da = self._extract_value_from_financials(reported_financials, "depreciation_and_amortization")
+        if actual_da is not None:
+            field_name = f"actual_da_{period_suffix.lower()}"
+            metric[field_name] = actual_da
+            mappings["depreciation_and_amortization"] = field_name
+            logger.info(f"  Using actual depreciation & amortization: {actual_da}")
+
+        actual_current_assets = self._extract_value_from_financials(reported_financials, "current_assets")
+        if actual_current_assets is not None:
+            field_name = f"actual_current_assets_{period_suffix.lower()}"
+            metric[field_name] = actual_current_assets
+            mappings["current_assets"] = field_name
+            logger.info(f"  Using actual current assets: {actual_current_assets}")
+
+        actual_current_liabilities = self._extract_value_from_financials(reported_financials, "current_liabilities")
+        if actual_current_liabilities is not None:
+            field_name = f"actual_current_liabilities_{period_suffix.lower()}"
+            metric[field_name] = actual_current_liabilities
+            mappings["current_liabilities"] = field_name
+            logger.info(f"  Using actual current liabilities: {actual_current_liabilities}")
+
+        actual_total_assets = self._extract_value_from_financials(reported_financials, "total_assets")
+        if actual_total_assets is not None:
+            field_name = f"actual_total_assets_{period_suffix.lower()}"
+            metric[field_name] = actual_total_assets
+            mappings["total_assets"] = field_name
+            logger.info(f"  Using actual total assets: {actual_total_assets}")
+
+        actual_total_liabilities = self._extract_value_from_financials(reported_financials, "total_liabilities")
+        if actual_total_liabilities is not None:
+            field_name = f"actual_total_liabilities_{period_suffix.lower()}"
+            metric[field_name] = actual_total_liabilities
+            mappings["total_liabilities"] = field_name
+            logger.info(f"  Using actual total liabilities: {actual_total_liabilities}")
+
+        # Gross profit from reported financials
+        actual_gross_profit = self._extract_value_from_financials(reported_financials, "gross_profit")
+        if actual_gross_profit is not None:
+            field_name = f"actual_gross_profit_{period_suffix.lower()}"
+            metric[field_name] = actual_gross_profit
+            mappings["gross_profit"] = field_name
+            logger.info(f"  Using actual gross profit: {actual_gross_profit}")
+
+        actual_operating_income = self._extract_value_from_financials(reported_financials, "operating_income")
+        if actual_operating_income is not None:
+            field_name = f"actual_operating_income_{period_suffix.lower()}"
+            metric[field_name] = actual_operating_income
+            mappings["operating_income"] = field_name
+            mappings["ebit"] = field_name  # Operating income is essentially EBIT
+            logger.info(f"  Using actual operating income/EBIT: {actual_operating_income}")
+
+        actual_cogs = self._extract_value_from_financials(reported_financials, "cost_of_goods_sold")
+        if actual_cogs is not None:
+            field_name = f"actual_cogs_{period_suffix.lower()}"
+            metric[field_name] = actual_cogs
+            mappings["cost_of_goods_sold"] = field_name
+            logger.info(f"  Using actual cost of goods sold: {actual_cogs}")
+
+        actual_rd = self._extract_value_from_financials(reported_financials, "research_and_development")
+        if actual_rd is not None:
+            field_name = f"actual_rd_{period_suffix.lower()}"
+            metric[field_name] = actual_rd
+            mappings["research_and_development"] = field_name
+            logger.info(f"  Using actual R&D: {actual_rd}")
+
+        actual_ar = self._extract_value_from_financials(reported_financials, "accounts_receivable")
+        if actual_ar is not None:
+            field_name = f"actual_accounts_receivable_{period_suffix.lower()}"
+            metric[field_name] = actual_ar
+            mappings["accounts_receivable"] = field_name
+            logger.info(f"  Using actual accounts receivable: {actual_ar}")
+
+        actual_inventory = self._extract_value_from_financials(reported_financials, "inventory")
+        if actual_inventory is not None:
+            field_name = f"actual_inventory_{period_suffix.lower()}"
+            metric[field_name] = actual_inventory
+            mappings["inventory"] = field_name
+            logger.info(f"  Using actual inventory: {actual_inventory}")
+
+        actual_ap = self._extract_value_from_financials(reported_financials, "accounts_payable")
+        if actual_ap is not None:
+            field_name = f"actual_accounts_payable_{period_suffix.lower()}"
+            metric[field_name] = actual_ap
+            mappings["accounts_payable"] = field_name
+            logger.info(f"  Using actual accounts payable: {actual_ap}")
+
+        # Cash and equivalents from reported financials
+        actual_cash = self._extract_value_from_financials(reported_financials, "cash_and_equivalents")
+        if actual_cash is not None:
+            field_name = f"actual_cash_{period_suffix.lower()}"
+            metric[field_name] = actual_cash
+            mappings["cash_and_equivalents"] = field_name
+            logger.info(f"  Using actual cash and equivalents: {actual_cash}")
+
+        # Calculate derived metrics from actual values only
+        # Free cash flow = Operating cash flow - Capital expenditure
+        if actual_ocf is not None and actual_capex is not None:
+            actual_fcf = actual_ocf - actual_capex
+            field_name = f"actual_fcf_{period_suffix.lower()}"
+            metric[field_name] = actual_fcf
+            mappings["free_cash_flow"] = field_name
+            logger.info(f"  Calculated actual free cash flow: {actual_fcf}")
+
+        if actual_current_assets is not None and actual_current_liabilities is not None:
+            actual_working_capital = actual_current_assets - actual_current_liabilities
+            field_name = f"actual_working_capital_{period_suffix.lower()}"
+            metric[field_name] = actual_working_capital
+            mappings["working_capital"] = field_name
+            logger.info(f"  Calculated actual working capital: {actual_working_capital}")
+
+        return mappings 

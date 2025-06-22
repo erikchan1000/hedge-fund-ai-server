@@ -147,12 +147,93 @@ class FinnHubFieldAdapter(FieldAdapter):
         else:
             return "annual"  # default
 
+class PolygonFieldAdapter(FieldAdapter):
+    """Adapter for Polygon.io API field mappings."""
+    
+    def __init__(self):
+        # Base mappings for Polygon.io financial data
+        self.base_mappings = {
+            "earnings_per_share": "basic_earnings_per_share",
+            "revenue": "revenues",
+            "net_income": "net_income_loss",
+            "book_value_per_share": "book_value_per_share",
+            "operating_cash_flow": "net_cash_flow_from_operating_activities",
+            "free_cash_flow": "free_cash_flow",
+            "cash_and_equivalents": "cash_and_cash_equivalents_at_carrying_value",
+            "total_assets": "assets",
+            "total_liabilities": "liabilities",
+            "current_assets": "assets_current",
+            "current_liabilities": "liabilities_current",
+            "total_debt": "debt",
+            "inventory": "inventory",
+            "accounts_receivable": "accounts_receivable_net_current",
+            "gross_profit": "gross_profit",
+            "operating_income": "operating_income_loss",
+            "ebitda": "ebitda",
+            "interest_expense": "interest_expense",
+            "capital_expenditures": "payments_to_acquire_property_plant_and_equipment",
+            "depreciation_and_amortization": "depreciation_depletion_and_amortization",
+            "research_and_development": "research_and_development_expense",
+            "working_capital": "working_capital",
+            "dividends_paid": "payments_of_dividends",
+        }
+        
+        # Series field mappings (for historical data)
+        self.series_mappings = {
+            "net_income": "net_income_loss",
+            "revenue": "revenues",
+            "free_cash_flow": "free_cash_flow",
+            "operating_cash_flow": "net_cash_flow_from_operating_activities",
+            "total_assets": "assets",
+            "total_debt": "debt",
+            "current_assets": "assets_current",
+            "current_liabilities": "liabilities_current",
+            "working_capital": "working_capital",
+            "capital_expenditure": "payments_to_acquire_property_plant_and_equipment",
+            "capital_expenditures": "payments_to_acquire_property_plant_and_equipment",
+            "depreciation_and_amortization": "depreciation_depletion_and_amortization",
+            "cash_and_equivalents": "cash_and_cash_equivalents_at_carrying_value",
+            "inventory": "inventory",
+            "accounts_receivable": "accounts_receivable_net_current",
+            "interest_expense": "interest_expense",
+            "gross_profit": "gross_profit",
+            "operating_income": "operating_income_loss",
+            "ebitda": "ebitda",
+            "research_and_development": "research_and_development_expense",
+            "earnings_per_share": "basic_earnings_per_share",
+        }
+    
+    def get_direct_mapping(self, line_item: str, period_suffix: str) -> Optional[str]:
+        """Get direct field mapping for a line item."""
+        # Polygon doesn't use period suffixes in the same way as FinnHub
+        # Return the base field name
+        return self.base_mappings.get(line_item)
+    
+    def get_series_mapping(self, line_item: str, period_key: str) -> Optional[str]:
+        """Get series field mapping for a line item."""
+        return self.series_mappings.get(line_item)
+    
+    def get_all_mappings(self, period_suffix: str) -> Dict[str, Optional[str]]:
+        """Get all direct field mappings for a given period."""
+        # For Polygon, we return all base mappings regardless of period
+        return self.base_mappings.copy()
+    
+    def get_period_key(self, period: str) -> str:
+        """Convert period parameter to series period key."""
+        if period.lower() == "ttm":
+            return "quarterly"
+        elif period.lower() in ["annual", "yearly"]:
+            return "annual"
+        else:
+            return "annual"
+
 class FieldMappingService:
     """Service to manage field mappings across different data sources."""
     
     def __init__(self):
         self.adapters = {
-            "finnhub": FinnHubFieldAdapter()
+            "finnhub": FinnHubFieldAdapter(),
+            "polygon": PolygonFieldAdapter()
         }
     
     def get_mappings_for_source(self, source: str, period_suffix: str) -> Dict[str, Optional[str]]:
