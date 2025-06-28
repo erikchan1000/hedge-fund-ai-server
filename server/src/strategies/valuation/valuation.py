@@ -56,8 +56,7 @@ def valuation_agent(state: AgentState):
                 "working_capital",
             ],
             end_date=end_date,
-            period="ttm",
-            limit=2,
+            period="ttm"
         )
         
         # Add logging to understand what was returned

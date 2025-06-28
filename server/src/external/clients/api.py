@@ -18,11 +18,13 @@ from data.models import (
     InsiderTrade,
     InsiderTradeResponse,
     CompanyFactsResponse,
+    LineItemName,
+    FinancialPeriod,
 )
 from external.clients.polygon_client import PolygonClient
 from external.clients.alpaca_client import AlpacaClient
 from external.clients.financial_calculator import FinancialCalculator
-from external.clients.field_adapters import FieldMappingService
+from external.clients.field_adapters import FieldMappingService, PolygonFieldMappingService
 
 
 logging.basicConfig(level=logging.DEBUG)
@@ -36,6 +38,7 @@ polygon_client = PolygonClient()
 alpaca_client = AlpacaClient()
 financial_calculator = FinancialCalculator()
 field_mapping_service = FieldMappingService()
+polygon_field_mapping_service = PolygonFieldMappingService()
 
 def get_prices(ticker: str, start_date: str, end_date: str) -> List[Price]:
     """Fetch price data from cache or Alpaca API."""
@@ -82,7 +85,7 @@ def get_financial_metrics(
     period: str = "ttm",
     limit: int = 10,
 ) -> List[FinancialMetrics]:
-    """Fetch financial metrics from cache or FinnHub API."""
+    """Fetch financial metrics from cache or Polygon API using definitive adapter."""
     
     if cached_data := _cache.get_financial_metrics(ticker):
         filtered_data = [FinancialMetrics(**metric) for metric in cached_data
@@ -92,281 +95,108 @@ def get_financial_metrics(
             return filtered_data[:limit]
 
     try:
+        from external.clients.field_adapters import PolygonFinancialAdapter
         
+        # Get company profile for market cap and currency
         profile = polygon_client.get_company_profile(ticker)
-
         
-        metrics_data = polygon_client.get_basic_financials(ticker, period=period, limit=limit)
-
+        # Get raw reported financials using new endpoint
+        raw_financials = polygon_client.get_raw_reported_financials(ticker, period=period)
         
-        metric = metrics_data.get("metric", {})
-        series = metrics_data.get("series", {})
-
+        # Initialize adapter
+        adapter = PolygonFinancialAdapter()
         
-        logger.info(f"Retrieved {len(metric)} metrics and {len(series)} series for {ticker}")
-
+        # Extract structured financial data
+        financial_data_list = adapter.extract_financial_data(raw_financials)
         
-        if series:
-            logger.info(f"Available series for {ticker}:")
-            for series_type, series_data in series.items():
-                if isinstance(series_data, dict):
-                    logger.info(f"  {series_type}: {len(series_data)} series - {list(series_data.keys())[:5]}...")
-                else:
-                    logger.info(f"  {series_type}: {type(series_data)}")
-
+        if not financial_data_list:
+            logger.warning(f"No financial data available for {ticker}")
+            return []
         
-        if period.lower() == "ttm":
-            suffix = "TTM"
-            series_key = "quarterly"  
-        elif period.lower() in ["annual", "yearly"]:
-            suffix = "Annual"
-            series_key = "annual"
-        else:
-            suffix = "TTM"  
-            series_key = "quarterly"
-
+        result = []
+        market_cap = profile.get("marketCapitalization")
         
-        market_cap = metric.get("marketCapitalization")
-        enterprise_value = metric.get("enterpriseValue")
-
-        
-        pe_ratio = metric.get(f"peBasicExclExtra{suffix}")
-        earnings_growth = metric.get(f"epsGrowth{suffix}Yoy") if suffix == "TTM" else metric.get("epsGrowthTTMYoy")
-        receivables_turnover = metric.get(f"receivablesTurnover{suffix}")
-        inventory_turnover = metric.get(f"inventoryTurnover{suffix}")
-        current_ratio = metric.get(f"currentRatio{suffix}")
-        quick_ratio = metric.get(f"quickRatio{suffix}")
-        debt_to_equity = metric.get(f"totalDebt/totalEquity{suffix}")
-        revenue_per_share = metric.get(f"revenuePerShare{suffix}")
-        cash_per_share = metric.get(f"cashPerSharePerShare{suffix}")
-        book_value_per_share = metric.get(f"bookValuePerShare{suffix}")
-
-        
-        ev_ebitda = metric.get(f"evEbitda{suffix}") or metric.get(f"enterpriseValueEbitda{suffix}")
-        ev_revenue = metric.get(f"evRevenue{suffix}") or metric.get(f"enterpriseValueRevenue{suffix}")
-        free_cash_flow = metric.get(f"freeCashFlow{suffix}") if suffix == "TTM" else metric.get("freeCashFlowTTM")
-        total_debt = metric.get(f"totalDebt{suffix}")
-        total_assets = metric.get(f"totalAssets{suffix}")
-        current_assets = metric.get(f"currentAssets{suffix}")
-        current_liabilities = metric.get(f"currentLiabilities{suffix}")
-        cash_and_equivalents = metric.get(f"cashAndEquivalents{suffix}")
-        operating_cash_flow = metric.get(f"operatingCashFlow{suffix}") if suffix == "TTM" else metric.get("operatingCashFlowTTM")
-        shares_outstanding = profile.get("shareOutstanding")
-
-        
-        
-        enterprise_value_to_ebitda_ratio = ev_ebitda
-        if not enterprise_value_to_ebitda_ratio and enterprise_value:
-            ebitda_field = f"ebitda{suffix}"
-            if metric.get(ebitda_field):
-                enterprise_value_to_ebitda_ratio = enterprise_value / metric.get(ebitda_field)
-
-        
-        enterprise_value_to_revenue_ratio = ev_revenue
-        if not enterprise_value_to_revenue_ratio and enterprise_value and revenue_per_share and shares_outstanding:
-            revenue = revenue_per_share * shares_outstanding
-            if revenue > 0:
-                enterprise_value_to_revenue_ratio = enterprise_value / revenue
-
-        
-        free_cash_flow_yield = None
-        if free_cash_flow and market_cap and market_cap > 0:
-            free_cash_flow_yield = free_cash_flow / market_cap
-
-        
-        peg_ratio = None
-        if pe_ratio and earnings_growth and earnings_growth > 0:
+        # Process each financial period
+        for data in financial_data_list[:limit]:
+            # Calculate all financial metrics
+            calculated_metrics = adapter.calculate_financial_metrics(data, market_cap)
             
-            growth_rate = earnings_growth / 100 if earnings_growth > 1 else earnings_growth
-            if growth_rate > 0:
-                peg_ratio = pe_ratio / (growth_rate * 100)
-
-        
-        days_sales_outstanding = None
-        if receivables_turnover and receivables_turnover > 0:
-            days_sales_outstanding = 365 / receivables_turnover
-
-        
-        operating_cycle = None
-        if days_sales_outstanding and inventory_turnover and inventory_turnover > 0:
-            days_inventory_outstanding = 365 / inventory_turnover
-            operating_cycle = days_sales_outstanding + days_inventory_outstanding
-
-        
-        working_capital_turnover = None
-        if revenue_per_share and shares_outstanding and current_assets and current_liabilities:
-            revenue = revenue_per_share * shares_outstanding
-            working_capital = current_assets - current_liabilities
-            if working_capital > 0:
-                working_capital_turnover = revenue / working_capital
-
-        
-        cash_ratio = None
-        if cash_and_equivalents and current_liabilities and current_liabilities > 0:
-            cash_ratio = cash_and_equivalents / current_liabilities
-        elif cash_per_share and shares_outstanding and current_liabilities and current_liabilities > 0:
-            total_cash = cash_per_share * shares_outstanding
-            cash_ratio = total_cash / current_liabilities
-
-        
-        operating_cash_flow_ratio = None
-        if operating_cash_flow and current_liabilities and current_liabilities > 0:
-            operating_cash_flow_ratio = operating_cash_flow / current_liabilities
-
-        
-        debt_to_assets = None
-        if total_debt and total_assets and total_assets > 0:
-            debt_to_assets = total_debt / total_assets
-        elif debt_to_equity and debt_to_equity > 0:
+            # Determine report period
+            report_period = data.period or end_date
             
-            debt_to_assets = debt_to_equity / (1 + debt_to_equity)
-
-        
-        free_cash_flow_per_share = None
-        if free_cash_flow and shares_outstanding and shares_outstanding > 0:
-            free_cash_flow_per_share = free_cash_flow / shares_outstanding
-
-        
-        # Get growth rates directly from Polygon.io API
-        revenue_growth_direct = metric.get(f"revenueGrowth{suffix}Yoy") or metric.get("revenueGrowthTTMYoy")
-        book_value_growth = metric.get(f"bookValueGrowth{suffix}Yoy") or metric.get("bookValueGrowthTTMYoy")
-        free_cash_flow_growth = metric.get(f"freeCashFlowGrowth{suffix}Yoy") or metric.get("freeCashFlowGrowthTTMYoy")
-        operating_income_growth = metric.get(f"operatingIncomeGrowth{suffix}Yoy") or metric.get("operatingIncomeGrowthTTMYoy")
-        ebitda_growth = metric.get(f"ebitdaGrowth{suffix}Yoy") or metric.get("ebitdaGrowthTTMYoy")
-        net_income_growth = metric.get(f"netIncomeGrowth{suffix}Yoy") or metric.get("netIncomeGrowthTTMYoy")
-        
-        # Use earnings_growth already calculated above, or try additional fields
-        if not earnings_growth:
-            earnings_growth = metric.get(f"epsGrowth{suffix}Yoy") or metric.get("epsGrowthTTMYoy")
-
-        
-        metrics = FinancialMetrics(
-            ticker=ticker,
-            report_period=end_date,
-            period=period,
-            currency=profile.get("currency", "USD"),
-            market_cap=market_cap,
-            enterprise_value=enterprise_value,
-            price_to_earnings_ratio=pe_ratio,
-            price_to_book_ratio=metric.get(f"pb{suffix}"),
-            price_to_sales_ratio=metric.get(f"ps{suffix}"),
-            enterprise_value_to_ebitda_ratio=enterprise_value_to_ebitda_ratio,
-            enterprise_value_to_revenue_ratio=enterprise_value_to_revenue_ratio,
-            free_cash_flow_yield=free_cash_flow_yield,
-            peg_ratio=peg_ratio,
-            gross_margin=metric.get(f"grossMargin{suffix}"),
-            operating_margin=metric.get(f"operatingMargin{suffix}"),
-            net_margin=metric.get(f"netProfitMargin{suffix}"),
-            return_on_equity=metric.get(f"roe{suffix}"),
-            return_on_assets=metric.get(f"roa{suffix}"),
-            return_on_invested_capital=metric.get(f"roi{suffix}"),
-            asset_turnover=metric.get(f"assetTurnover{suffix}"),
-            inventory_turnover=inventory_turnover,
-            receivables_turnover=receivables_turnover,
-            days_sales_outstanding=days_sales_outstanding,
-            operating_cycle=operating_cycle,
-            working_capital_turnover=working_capital_turnover,
-            current_ratio=current_ratio,
-            quick_ratio=quick_ratio,
-            cash_ratio=cash_ratio,
-            operating_cash_flow_ratio=operating_cash_flow_ratio,
-            debt_to_equity=debt_to_equity,
-            debt_to_assets=debt_to_assets,
-            interest_coverage=metric.get(f"netInterestCoverage{suffix}"),
-            revenue_growth=revenue_growth_direct,
-            earnings_growth=earnings_growth,
-            book_value_growth=book_value_growth,
-            earnings_per_share_growth=earnings_growth,
-            free_cash_flow_growth=free_cash_flow_growth,
-            operating_income_growth=operating_income_growth,
-            ebitda_growth=ebitda_growth,
-            payout_ratio=metric.get(f"payoutRatio{suffix}"),
-            earnings_per_share=metric.get(f"epsBasicExclExtraItems{suffix}"),
-            book_value_per_share=book_value_per_share,
-            free_cash_flow_per_share=free_cash_flow_per_share
-        )
-
-        
-        result = [metrics]
-
-        
-        if limit > 1 and series:
-            historical_periods = []
-            series_data = series.get(series_key, {})
-
-            if series_data and isinstance(series_data, dict):
+            # Create FinancialMetrics object
+            metrics = FinancialMetrics(
+                ticker=ticker,
+                report_period=report_period,
+                period=period,
+                currency=profile.get("currency", "USD"),
                 
-                key_metrics = ["marketCapitalization", "epsBasicExclExtraItemsAnnual", "revenuePerShareAnnual"]
-
-                for key_metric in key_metrics:
-                    if key_metric in series_data:
-                        historical_data = series_data[key_metric]
-                        if isinstance(historical_data, list) and len(historical_data) > 1:
-                            
-                            sorted_data = sorted(historical_data, key=lambda x: x.get("period", ""), reverse=True)
-
-                            
-                            for i, period_data in enumerate(sorted_data[1:limit]):
-                                if isinstance(period_data, dict) and period_data.get("period"):
-                                    
-                                    historical_metrics = FinancialMetrics(
-                                        ticker=ticker,
-                                        report_period=period_data["period"],
-                                        period=period,
-                                        currency=profile.get("currency", "USD"),
-                                        market_cap=None,  
-                                        enterprise_value=None,
-                                        price_to_earnings_ratio=None,
-                                        price_to_book_ratio=None,
-                                        price_to_sales_ratio=None,
-                                        enterprise_value_to_ebitda_ratio=None,
-                                        enterprise_value_to_revenue_ratio=None,
-                                        free_cash_flow_yield=None,
-                                        peg_ratio=None,
-                                        gross_margin=None,
-                                        operating_margin=None,
-                                        net_margin=None,
-                                        return_on_equity=None,
-                                        return_on_assets=None,
-                                        return_on_invested_capital=None,
-                                        asset_turnover=None,
-                                        inventory_turnover=None,
-                                        receivables_turnover=None,
-                                        days_sales_outstanding=None,
-                                        operating_cycle=None,
-                                        working_capital_turnover=None,
-                                        current_ratio=None,
-                                        quick_ratio=None,
-                                        cash_ratio=None,
-                                        operating_cash_flow_ratio=None,
-                                        debt_to_equity=None,
-                                        debt_to_assets=None,
-                                        interest_coverage=None,
-                                        revenue_growth=None,
-                                        earnings_growth=None,
-                                        book_value_growth=None,
-                                        earnings_per_share_growth=None,
-                                        free_cash_flow_growth=None,
-                                        operating_income_growth=None,
-                                        ebitda_growth=None,
-                                        payout_ratio=None,
-                                        earnings_per_share=float(period_data["v"]) if key_metric.startswith("eps") else None,
-                                        book_value_per_share=None,
-                                        free_cash_flow_per_share=None
-                                    )
-                                    historical_periods.append(historical_metrics)
-                            break  
-
+                # Market & Valuation
+                market_cap=calculated_metrics.get("market_cap"),
+                enterprise_value=None,  # Not calculated in basic adapter
+                price_to_earnings_ratio=None,  # Requires stock price
+                price_to_book_ratio=None,  # Requires stock price  
+                price_to_sales_ratio=None,  # Requires stock price
+                enterprise_value_to_ebitda_ratio=None,  # Requires enterprise value
+                enterprise_value_to_revenue_ratio=None,  # Requires enterprise value
+                free_cash_flow_yield=None,  # Requires market cap and FCF
+                peg_ratio=None,  # Requires P/E and growth rate
+                
+                # Profitability & Margins
+                gross_margin=calculated_metrics.get("gross_margin"),
+                operating_margin=calculated_metrics.get("operating_margin"),
+                net_margin=calculated_metrics.get("net_margin"),
+                return_on_equity=calculated_metrics.get("return_on_equity"),
+                return_on_assets=calculated_metrics.get("return_on_assets"),
+                return_on_invested_capital=None,  # Requires ROIC calculation
+                
+                # Activity & Efficiency
+                asset_turnover=calculated_metrics.get("asset_turnover"),
+                inventory_turnover=calculated_metrics.get("inventory_turnover"),
+                receivables_turnover=calculated_metrics.get("receivables_turnover"),
+                days_sales_outstanding=calculated_metrics.get("days_sales_outstanding"),
+                operating_cycle=None,  # Could be calculated
+                working_capital_turnover=None,  # Could be calculated
+                
+                # Liquidity
+                current_ratio=calculated_metrics.get("current_ratio"),
+                quick_ratio=None,  # Requires quick assets calculation
+                cash_ratio=None,  # Could be calculated
+                operating_cash_flow_ratio=calculated_metrics.get("operating_cash_flow_ratio"),
+                
+                # Leverage
+                debt_to_equity=calculated_metrics.get("debt_to_equity"),
+                debt_to_assets=calculated_metrics.get("debt_to_assets"),
+                interest_coverage=None,  # Requires EBIT/Interest calculation
+                
+                # Growth - Not available from single period data
+                revenue_growth=None,
+                earnings_growth=None,
+                book_value_growth=None,
+                earnings_per_share_growth=None,
+                free_cash_flow_growth=None,
+                operating_income_growth=None,
+                ebitda_growth=None,
+                
+                # Per Share
+                earnings_per_share=calculated_metrics.get("earnings_per_share"),
+                book_value_per_share=calculated_metrics.get("book_value_per_share"),
+                free_cash_flow_per_share=calculated_metrics.get("free_cash_flow_per_share"),
+                payout_ratio=None  # Requires dividends data
+            )
             
-            result.extend(historical_periods[:limit-1])  
-
+            result.append(metrics)
         
+        # Cache and return results
         _cache.set_financial_metrics(ticker, [m.model_dump() for m in result])
         return result[:limit]
-
+        
     except Exception as e:
         logger.error(f"Error fetching financial metrics for {ticker}: {str(e)}")
         raise
+
+
+
 
 def get_insider_trades(
     ticker: str,
@@ -503,174 +333,82 @@ def get_price_data(ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
 
 def search_line_items(
     ticker: str,
-    line_items: List[str],
+    line_items: List[LineItemName],
     end_date: str,
-    period: str = "ttm",
-    limit: int = 10
+    period: FinancialPeriod = FinancialPeriod.TTM,
+    limit: int = 30
 ) -> List[LineItem]:
-    """Search for line items from cache or API using enhanced financial calculator with reported financials."""
+    """Search for specific line items using definitive adapter mappings."""
     
     # Check cache first
+    period_str = period.value if hasattr(period, 'value') else str(period).lower()
     if cached_data := _cache.get_line_items(ticker):
         filtered_data = [LineItem(**item) for item in cached_data
-                        if item["report_period"] <= end_date and item.get("period", "ttm") == period]
+                        if item["report_period"] <= end_date and item.get("period", "ttm") == period_str]
         filtered_data.sort(key=lambda x: x.report_period, reverse=True)
         if filtered_data:
             return filtered_data[:limit]
 
     try:
-        logger.info(f"Searching line items for {ticker}: {line_items}")
+        from external.clients.field_adapters import PolygonFinancialAdapter
         
+        logger.info(f"Searching line items for {ticker}: {[item.value if hasattr(item, 'value') else str(item) for item in line_items]}")
+        
+        # Get company profile for additional context
         profile = polygon_client.get_company_profile(ticker)
         
-        metrics_data = polygon_client.get_basic_financials(ticker, period=period, limit=limit)
-        metric = metrics_data.get("metric", {})
-        series = metrics_data.get("series", {})
+        # Get raw reported financials
+        raw_financials = polygon_client.get_raw_reported_financials(ticker, period=period_str)
         
-        # Get reported financials for actual values (required)
-        try:
-            raw_reported_financials = polygon_client.get_reported_financials(ticker, freq="annual")
-            logger.info(f"Retrieved raw reported financials for {ticker}: {len(raw_reported_financials)} years")
-            
-            # Adapt raw Polygon.io format to expected format for financial calculator
-            reported_financials = {"data": []}
-            for financial in raw_reported_financials:
-                # Get period date safely
-                period_date = getattr(financial, 'period_of_report_date', '')
-                if hasattr(period_date, 'strftime'):
-                    period_str = period_date.strftime("%Y-%m-%d")
-                else:
-                    period_str = str(period_date)
-                
-                reported_financials["data"].append({
-                    "symbol": ticker,
-                    "year": getattr(financial, 'fiscal_year', None),
-                    "quarter": getattr(financial, 'fiscal_quarter', None),
-                    "period": period_str,
-                    "report": getattr(financial, 'financials', {})
-                })
-            
-            logger.info(f"Adapted reported financials for {ticker}: {len(reported_financials['data'])} years")
-        except Exception as e:
-            logger.warning(f"Failed to retrieve reported financials for {ticker}: {str(e)}")
-            # Create empty reported financials structure to allow workflow to continue
-            reported_financials = {"data": []}
+        # Initialize adapter
+        adapter = PolygonFinancialAdapter()
         
-        if not reported_financials or "data" not in reported_financials or not reported_financials["data"]:
-            logger.warning(f"No reported financials data available for {ticker}. Using basic metrics only.")
-            reported_financials = {"data": []}  # Empty but valid structure
+        # Extract structured financial data
+        financial_data_list = adapter.extract_financial_data(raw_financials)
         
-        # Determine period suffix for field mappings
-        if period.lower() == "ttm":
-            period_suffix = "TTM"
-            series_key = "quarterly"
-        elif period.lower() in ["annual", "yearly"]:
-            period_suffix = "Annual" 
-            series_key = "annual"
-        else:
-            period_suffix = "TTM"
-            series_key = "quarterly"
-        
-        # Get field mappings using FieldMappingService
-        mappings = field_mapping_service.get_mappings_for_source("polygon", period_suffix)
-        
-        # Extract actual metrics using financial calculator with reported financials
-        calculated_mappings = financial_calculator.calculate_missing_metrics(
-            metric, period_suffix, reported_financials
-        )
-        
-        # Combine field mappings with calculated mappings
-        all_mappings = {**mappings, **calculated_mappings}
-        
-        logger.info(f"Available mappings for {ticker}: {list(all_mappings.keys())}")
-        logger.info(f"Calculated mappings: {list(calculated_mappings.keys())}")
+        if not financial_data_list:
+            logger.warning(f"No financial data available for {ticker}")
+            return []
         
         result = []
         
-        # Process each requested line item
-        for line_item in line_items:
-            logger.info(f"Processing line item: {line_item}")
+        # Process each financial period
+        for financial_data in financial_data_list[:limit]:
+            # Get the definitive field mappings for this data period
+            field_mappings = adapter.get_line_item_mappings(financial_data)
             
-            # Try to get direct field mapping
-            field_name = all_mappings.get(line_item)
-            if field_name and field_name in metric:
-                value = metric[field_name]
+            # Determine report period
+            report_period = financial_data.period or end_date
+            
+            # Process each requested line item
+            for line_item in line_items:
+                # Handle both enum and string inputs
+                if hasattr(line_item, 'value'):
+                    line_item_str = line_item.value
+                else:
+                    line_item_str = str(line_item)
+                
+                # Get the value using definitive adapter mapping
+                value = field_mappings.get(line_item_str)
+                
                 if value is not None:
                     result.append(LineItem(
                         ticker=ticker,
-                        name=line_item,
+                        name=line_item_str,
                         value=float(value),
-                        report_period=end_date,
-                        period=period,
+                        report_period=report_period,
+                        period=period_str,
                         currency=profile.get("currency", "USD"),
-                        source="finnhub_direct"
+                        source="polygon_adapter"
                     ))
-                    logger.info(f"  Found direct value for {line_item}: {value}")
-                    continue
-            
-            # Try series data for historical values
-            series_field = field_mapping_service.get_series_mapping("polygon", line_item, series_key)
-            if series_field and series_field in series.get(series_key, {}):
-                series_data = series[series_key][series_field]
-                if isinstance(series_data, list) and series_data:
-                    # Sort by period and take the most recent
-                    sorted_data = sorted(series_data, key=lambda x: x.get("period", ""), reverse=True)
-                    for period_data in sorted_data[:limit]:
-                        if isinstance(period_data, dict) and period_data.get("v") is not None:
-                            result.append(LineItem(
-                                ticker=ticker,
-                                name=line_item,
-                                value=float(period_data["v"]),
-                                report_period=period_data.get("period", end_date),
-                                period=period,
-                                currency=profile.get("currency", "USD"),
-                                source="finnhub_series"
-                            ))
-                            logger.info(f"  Found series value for {line_item}: {period_data['v']} ({period_data.get('period')})")
-                            break
-                    continue
-            
-            if line_item in ["outstanding_shares", "shares_outstanding"] and profile.get("shareOutstanding"):
-                result.append(LineItem(
-                    ticker=ticker,
-                    name=line_item,
-                    value=float(profile["shareOutstanding"]),
-                    report_period=end_date,
-                    period=period,
-                    currency=profile.get("currency", "USD"),
-                    source="finnhub_profile"
-                ))
-                logger.info(f"  Found shares outstanding from profile: {profile['shareOutstanding']}")
-                continue
-            
-            shares_outstanding = profile.get("shareOutstanding")
-            if shares_outstanding and line_item in ["revenue", "net_income", "operating_cash_flow"]:
-                per_share_field = None
-                if line_item == "revenue":
-                    per_share_field = f"revenuePerShare{period_suffix}"
-                elif line_item == "net_income" and f"epsBasicExclExtraItems{period_suffix}" in metric:
-                    per_share_field = f"epsBasicExclExtraItems{period_suffix}"
-                elif line_item == "operating_cash_flow":
-                    per_share_field = f"cashFlowPerShare{period_suffix}"
-                
-                if per_share_field and metric.get(per_share_field):
-                    calculated_value = metric[per_share_field] * shares_outstanding
-                    result.append(LineItem(
-                        ticker=ticker,
-                        name=line_item,
-                        value=float(calculated_value),
-                        report_period=end_date,
-                        period=period,
-                        currency=profile.get("currency", "USD"),
-                        source="finnhub_calculated"
-                    ))
-                    logger.info(f"  Calculated {line_item} from per-share data: {calculated_value}")
-                    continue
-            
-            logger.warning(f"  Could not find value for line item: {line_item}")
+                    logger.info(f"Found {line_item_str}: {value} for period {report_period}")
+                else:
+                    logger.debug(f"No value found for {line_item_str} in period {report_period}")
         
+        # Sort by report period (most recent first)
         result.sort(key=lambda x: x.report_period, reverse=True)
         
+        # Cache results
         if result:
             _cache.set_line_items(ticker, [item.model_dump() for item in result])
         

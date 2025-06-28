@@ -360,7 +360,7 @@ class PolygonClient:
                 metrics["marketCapitalization"] = getattr(ticker_details, 'market_cap', None)
                 metrics["shareOutstanding"] = getattr(ticker_details, 'share_class_shares_outstanding', None)
                 
-            # Process financial data
+            # Process each StockFinancial object to build time series
             for financial in financials:
                 financial_data = getattr(financial, 'financials', None)
                 if financial_data:
@@ -368,33 +368,45 @@ class PolygonClient:
                     financial_dict = self._convert_financials_to_dict(financial_data)
                     
                     if financial_dict:
-                        # Determine period type
+                        # Determine period type (quarterly vs annual)
                         fiscal_quarter = getattr(financial, 'fiscal_quarter', None)
                         period_key = "quarterly" if fiscal_quarter else "annual"
                         
-                        # Add metrics with period suffix
-                        suffix = "TTM" if period.lower() == "ttm" else "Annual"
+                        # Get period date safely
+                        period_date = getattr(financial, 'period_of_report_date', '')
+                        if hasattr(period_date, 'strftime'):
+                            period_str = period_date.strftime("%Y-%m-%d")
+                        else:
+                            period_str = str(period_date)
                         
+                        # Process each metric in this financial period
                         for key, value in financial_dict.items():
                             if isinstance(value, (int, float)) and value is not None:
-                                metric_key = f"{key}{suffix}"
-                                metrics[metric_key] = value
-                                
-                                # Add to series
+                                # Initialize series array for this metric if it doesn't exist
                                 if key not in series[period_key]:
                                     series[period_key][key] = []
                                 
-                                # Get period date safely
-                                period_date = getattr(financial, 'period_of_report_date', '')
-                                if hasattr(period_date, 'strftime'):
-                                    period_str = period_date.strftime("%Y-%m-%d")
-                                else:
-                                    period_str = str(period_date)
-                                
+                                # Add this period's data point to the time series
                                 series[period_key][key].append({
                                     "period": period_str,
                                     "v": value
                                 })
+                                
+                                # Update the latest metric value (for the metrics dict)
+                                suffix = "TTM" if period.lower() == "ttm" else "Annual"
+                                metric_key = f"{key}{suffix}"
+                                
+                                # Keep the most recent value (financials are usually ordered by date)
+                                if metric_key not in metrics:
+                                    metrics[metric_key] = value
+            
+            # Sort time series data by period date (most recent first)
+            for period_type in series:
+                for metric_name in series[period_type]:
+                    series[period_type][metric_name].sort(
+                        key=lambda x: x["period"], 
+                        reverse=True
+                    )
             
             return {
                 "metric": metrics,
@@ -582,26 +594,68 @@ class PolygonClient:
             return {"s": "error"}
     
     def get_reported_financials(self, symbol: str, freq: str = "annual") -> List[Dict[str, Any]]:
-        """Get historical reported financials - returns raw Polygon.io response."""
+        """Get historical reported financials with processed financial data and derived metrics."""
+        
         try:
+            # Default to one year ago from today
+            one_year_ago = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%d")
+            
             # Get financial data using the vX endpoint
             financials = list(self._execute_with_retry(
                 self.client.vx.list_stock_financials,
                 ticker=symbol,
-                period_of_report_date_gte="2020-01-01",
+                period_of_report_date_gte=one_year_ago,
                 limit=20
             ))
             
-            # Filter by frequency and return raw response
-            filtered_financials = []
+            # Filter by frequency and process financial data
+            processed_financials = []
             for financial in financials:
                 fiscal_quarter = getattr(financial, 'fiscal_quarter', None)
-                if freq == "annual" and fiscal_quarter is None:
-                    filtered_financials.append(financial)
-                elif freq == "quarterly" and fiscal_quarter is not None:
-                    filtered_financials.append(financial)
+                
+                # Filter by frequency
+                if freq == "annual" and fiscal_quarter is not None:
+                    continue
+                elif freq == "quarterly" and fiscal_quarter is None:
+                    continue
+                
+                # Convert Financials object to dictionary with derived metrics
+                financials_obj = getattr(financial, 'financials', None)
+                financials_dict = self._convert_financials_to_dict(financials_obj) if financials_obj else {}
+                
+                # Build comprehensive financial data structure
+                financial_data = {
+                    "cik": getattr(financial, 'cik', None),
+                    "company_name": getattr(financial, 'company_name', None),
+                    "end_date": getattr(financial, 'end_date', None),
+                    "filing_date": getattr(financial, 'filing_date', None),
+                    "fiscal_period": getattr(financial, 'fiscal_period', None),
+                    "fiscal_year": getattr(financial, 'fiscal_year', None),
+                    "start_date": getattr(financial, 'start_date', None),
+                    "period_of_report_date": getattr(financial, 'period_of_report_date', None),
+                    "source_filing_url": getattr(financial, 'source_filing_url', None),
+                    "source_filing_file_url": getattr(financial, 'source_filing_file_url', None),
+                    "financials": financials_dict  # Processed financial data with derived metrics
+                }
+                
+                # Convert date objects to strings if necessary
+                for date_field in ["end_date", "filing_date", "start_date", "period_of_report_date"]:
+                    date_value = financial_data.get(date_field)
+                    if date_value and hasattr(date_value, 'strftime'):
+                        try:
+                            financial_data[date_field] = date_value.strftime("%Y-%m-%d")
+                        except:
+                            financial_data[date_field] = str(date_value)
+                
+                processed_financials.append(financial_data)
             
-            return filtered_financials
+            # Sort by period date (most recent first)
+            processed_financials.sort(
+                key=lambda x: x.get('period_of_report_date', '') or '', 
+                reverse=True
+            )
+            
+            return processed_financials
             
         except Exception as e:
             logger.error(f"Error getting reported financials for {symbol}: {str(e)}")
@@ -621,4 +675,96 @@ class PolygonClient:
     
     def get_historical_financial_metrics(self, symbol: str, metric: str = "all") -> Dict[str, Any]:
         """Get historical financial metrics with time series data."""
-        return self.get_basic_financials(symbol) 
+        return self.get_basic_financials(symbol)
+    
+    def get_raw_reported_financials(self, symbol: str, period: str = "ttm") -> Dict[str, Any]:
+        """Get raw reported financials directly from Polygon reference/financials endpoint."""
+        try:
+            # Use reference/financials endpoint for raw data
+            from_date = (datetime.now() - timedelta(days=365*3)).strftime("%Y-%m-%d")  # 3 years
+            
+            # Get raw financials using reference endpoint
+            # Note: This would require using the raw REST API, not the Python SDK
+            # For now, return the processed data we already have
+            financials = list(self._execute_with_retry(
+                self.client.vx.list_stock_financials,
+                ticker=symbol,
+                period_of_report_date_gte=from_date,
+                limit=20
+            ))
+            
+            # Build response in Polygon reference/financials format
+            results = []
+            for financial in financials:
+                result = {
+                    "start_date": getattr(financial, 'start_date', ''),
+                    "end_date": getattr(financial, 'end_date', ''),
+                    "filing_date": getattr(financial, 'filing_date', ''),
+                    "timeframe": getattr(financial, 'fiscal_period', '').lower() if hasattr(financial, 'fiscal_period') else '',
+                    "fiscal_period": getattr(financial, 'fiscal_period', ''),
+                    "fiscal_year": getattr(financial, 'fiscal_year', ''),
+                    "cik": getattr(financial, 'cik', ''),
+                    "company_name": getattr(financial, 'company_name', ''),
+                    "financials": {}
+                }
+                
+                # Convert processed financials back to raw format
+                financials_obj = getattr(financial, 'financials', None)
+                if financials_obj:
+                    result["financials"] = self._convert_to_reference_format(financials_obj)
+                
+                # Convert dates to strings
+                for date_field in ["start_date", "end_date", "filing_date"]:
+                    date_value = result.get(date_field)
+                    if date_value and hasattr(date_value, 'strftime'):
+                        try:
+                            result[date_field] = date_value.strftime("%Y-%m-%d")
+                        except:
+                            result[date_field] = str(date_value)
+                
+                results.append(result)
+            
+            return {
+                "results": results,
+                "status": "OK"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error getting raw reported financials for {symbol}: {str(e)}")
+            return {"results": [], "status": "ERROR"}
+    
+    def _convert_to_reference_format(self, financials_obj) -> Dict[str, Any]:
+        """Convert processed financials back to reference format."""
+        reference_format = {
+            "balance_sheet": {},
+            "income_statement": {},
+            "cash_flow_statement": {},
+            "comprehensive_income": {}
+        }
+        
+        if not financials_obj:
+            return reference_format
+        
+        # Process each financial statement section
+        sections = ['balance_sheet', 'income_statement', 'cash_flow_statement', 'comprehensive_income']
+        
+        for section_name in sections:
+            section_obj = getattr(financials_obj, section_name, None)
+            if section_obj:
+                # Get all attributes of the section object
+                for attr_name in dir(section_obj):
+                    if not attr_name.startswith('_'):  # Skip private attributes
+                        attr_value = getattr(section_obj, attr_name, None)
+                        
+                        # Try to extract value from DataPoint
+                        extracted_value = self._extract_datapoint_value(attr_value)
+                        if extracted_value is not None:
+                            # Create reference format entry
+                            reference_format[section_name][attr_name] = {
+                                "value": extracted_value,
+                                "unit": "USD",
+                                "label": attr_name.replace('_', ' ').title(),
+                                "order": 100
+                            }
+        
+        return reference_format 

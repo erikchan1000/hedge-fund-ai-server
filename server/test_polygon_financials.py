@@ -12,6 +12,7 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 from external.clients.polygon_client import PolygonClient
+from external.clients.api import search_line_items
 
 # Configure logging
 logging.basicConfig(
@@ -156,9 +157,175 @@ def test_polygon_financials():
         logger.error(f"❌ get_stock_price() failed: {e}")
         return False
     
+    # Test 5: Search Line Items
+    logger.info("\n" + "="*50)
+    logger.info("TEST 5: search_line_items()")
+    logger.info("="*50)
+    
+    try:
+        # Test with common financial line items
+        test_line_items = [
+            "revenue",
+            "net_income", 
+            "total_assets",
+            "current_assets",
+            "current_liabilities",
+            "shares_outstanding",
+            "earnings_per_share",
+            "book_value_per_share"
+        ]
+        
+        line_items_result = search_line_items(
+            ticker=test_ticker,
+            line_items=test_line_items,
+            end_date="2024-12-31",
+            period="ttm",
+            limit=5
+        )
+        
+        logger.info(f"✅ Search line items retrieved successfully")
+        logger.info(f"Number of line items found: {len(line_items_result)}")
+        
+        # Log details about found line items
+        if line_items_result:
+            logger.info("Found line items:")
+            for item in line_items_result:
+                logger.info(f"  {item.name}: {item.value} ({item.currency}) - Period: {item.report_period} - Source: {item.source}")
+        
+        # Test assertions
+        assert isinstance(line_items_result, list), "search_line_items should return a list"
+        
+        # Check that we found at least some line items
+        if line_items_result:
+            first_item = line_items_result[0]
+            assert hasattr(first_item, 'ticker'), "LineItem should have ticker attribute"
+            assert hasattr(first_item, 'name'), "LineItem should have name attribute"
+            assert hasattr(first_item, 'value'), "LineItem should have value attribute"
+            assert hasattr(first_item, 'report_period'), "LineItem should have report_period attribute"
+            assert hasattr(first_item, 'currency'), "LineItem should have currency attribute"
+            assert first_item.ticker == test_ticker, f"Ticker should be {test_ticker}"
+            assert first_item.value is not None, "Value should not be None"
+            logger.info(f"✅ Line item structure validation passed")
+        else:
+            logger.warning("⚠️ No line items found - this might be expected if data is not available")
+        
+    except Exception as e:
+        logger.error(f"❌ search_line_items() failed: {e}")
+        return False
+    
     logger.info("\n" + "="*50)
     logger.info("🎉 ALL TESTS PASSED!")
     logger.info("="*50)
+    return True
+
+def test_search_line_items_detailed():
+    """Test search_line_items function with various scenarios."""
+    logger.info("\n" + "="*50)
+    logger.info("DETAILED TEST: search_line_items()")
+    logger.info("="*50)
+    
+    test_ticker = "AAPL"
+    
+    # Test 1: Common line items that should exist
+    logger.info("\nTest 1: Common financial line items")
+    try:
+        common_items = ["revenue", "net_income", "total_assets", "shares_outstanding"]
+        results = search_line_items(
+            ticker=test_ticker,
+            line_items=common_items,
+            end_date="2024-12-31",
+            period="ttm",
+            limit=10
+        )
+        
+        logger.info(f"Found {len(results)} line items for common request")
+        for item in results:
+            logger.info(f"  - {item.name}: {item.value:,.2f} {item.currency}")
+        
+        assert len(results) > 0, "Should find at least some common line items"
+        
+    except Exception as e:
+        logger.error(f"❌ Common line items test failed: {e}")
+        return False
+    
+    # Test 2: Per-share metrics
+    logger.info("\nTest 2: Per-share metrics")
+    try:
+        per_share_items = ["earnings_per_share", "book_value_per_share", "revenue_per_share"]
+        results = search_line_items(
+            ticker=test_ticker,
+            line_items=per_share_items,
+            end_date="2024-12-31",
+            period="ttm",
+            limit=5
+        )
+        
+        logger.info(f"Found {len(results)} per-share metrics")
+        for item in results:
+            logger.info(f"  - {item.name}: ${item.value:.2f} per share")
+            
+    except Exception as e:
+        logger.error(f"❌ Per-share metrics test failed: {e}")
+        return False
+    
+    # Test 3: Balance sheet items
+    logger.info("\nTest 3: Balance sheet items")
+    try:
+        balance_sheet_items = ["current_assets", "current_liabilities", "total_debt", "cash_and_equivalents"]
+        results = search_line_items(
+            ticker=test_ticker,
+            line_items=balance_sheet_items,
+            end_date="2024-12-31",
+            period="annual",
+            limit=3
+        )
+        
+        logger.info(f"Found {len(results)} balance sheet items")
+        for item in results:
+            logger.info(f"  - {item.name}: ${item.value:,.0f} ({item.period})")
+            
+    except Exception as e:
+        logger.error(f"❌ Balance sheet items test failed: {e}")
+        return False
+    
+    # Test 4: Invalid ticker (error handling)
+    logger.info("\nTest 4: Error handling with invalid ticker")
+    try:
+        results = search_line_items(
+            ticker="INVALID_TICKER_XYZ",
+            line_items=["revenue"],
+            end_date="2024-12-31",
+            period="ttm",
+            limit=1
+        )
+        logger.info(f"Invalid ticker returned {len(results)} results (expected behavior)")
+        
+    except Exception as e:
+        logger.info(f"Expected error for invalid ticker: {str(e)[:100]}...")
+    
+    # Test 5: Non-existent line items
+    logger.info("\nTest 5: Non-existent line items")
+    try:
+        fake_items = ["nonexistent_metric", "fake_line_item", "imaginary_value"]
+        results = search_line_items(
+            ticker=test_ticker,
+            line_items=fake_items,
+            end_date="2024-12-31",
+            period="ttm",
+            limit=5
+        )
+        
+        logger.info(f"Non-existent line items returned {len(results)} results")
+        if results:
+            logger.warning("⚠️ Unexpected: Found results for non-existent line items")
+        else:
+            logger.info("✅ Correctly returned no results for non-existent line items")
+            
+    except Exception as e:
+        logger.error(f"Non-existent line items test failed: {e}")
+        return False
+    
+    logger.info("\n✅ All search_line_items detailed tests completed!")
     return True
 
 def test_rate_limiting():
@@ -205,6 +372,10 @@ if __name__ == "__main__":
     
     # Run financial tests
     success = test_polygon_financials()
+    
+    if success:
+        # Run detailed search_line_items test
+        success = test_search_line_items_detailed()
     
     if success:
         # Run rate limiting test

@@ -1,4 +1,8 @@
 from pydantic import BaseModel
+from decimal import Decimal
+from typing import Dict, Any, List, Optional, Union, Literal
+from datetime import datetime
+from enum import Enum
 
 
 class Price(BaseModel):
@@ -172,3 +176,96 @@ class AgentStateData(BaseModel):
 class AgentStateMetadata(BaseModel):
     show_reasoning: bool = False
     model_config = {"extra": "allow"}
+
+
+class FinancialPeriod(str, Enum):
+    TTM = "ttm"
+    ANNUAL = "annual"
+    QUARTERLY = "quarterly"
+
+
+class LineItemName(str, Enum):
+    """Comprehensive enum of all financial line items used across the hedge fund analysis system"""
+    
+    # Core Financial Statement Items
+    REVENUE = "revenue"
+    TOTAL_REVENUE = "total_revenue"
+    NET_INCOME = "net_income"
+    OPERATING_INCOME = "operating_income"
+    GROSS_PROFIT = "gross_profit"
+    EBIT = "ebit"
+    EBITDA = "ebitda"
+    
+    # Balance Sheet - Assets
+    TOTAL_ASSETS = "total_assets"
+    CURRENT_ASSETS = "current_assets"
+    NONCURRENT_ASSETS = "noncurrent_assets"
+    CASH_AND_EQUIVALENTS = "cash_and_equivalents"
+    CASH = "cash"
+    ACCOUNTS_RECEIVABLE = "accounts_receivable"
+    INVENTORY = "inventory"
+    PREPAID_EXPENSES = "prepaid_expenses"
+    OTHER_CURRENT_ASSETS = "other_current_assets"
+    FIXED_ASSETS = "fixed_assets"
+    INTANGIBLE_ASSETS = "intangible_assets"
+    LONG_TERM_INVESTMENTS = "long_term_investments"
+    OTHER_NONCURRENT_ASSETS = "other_noncurrent_assets"
+    
+    # Balance Sheet - Liabilities
+    TOTAL_LIABILITIES = "total_liabilities"
+    CURRENT_LIABILITIES = "current_liabilities"
+    NONCURRENT_LIABILITIES = "noncurrent_liabilities"
+    ACCOUNTS_PAYABLE = "accounts_payable"
+    INTEREST_PAYABLE = "interest_payable"
+    WAGES = "wages"
+    OTHER_CURRENT_LIABILITIES = "other_current_liabilities"
+    LONG_TERM_DEBT = "long_term_debt"
+    SHORT_TERM_DEBT = "short_term_debt"
+    TOTAL_DEBT = "total_debt"
+    
+    # Balance Sheet - Equity
+    SHAREHOLDERS_EQUITY = "shareholders_equity"
+    TOTAL_EQUITY = "total_equity"
+    EQUITY_ATTRIBUTABLE_TO_PARENT = "equity_attributable_to_parent"
+    EQUITY_ATTRIBUTABLE_TO_NONCONTROLLING_INTEREST = "equity_attributable_to_noncontrolling_interest"
+    RETAINED_EARNINGS = "retained_earnings"
+    
+    # Cash Flow Statement
+    FREE_CASH_FLOW = "free_cash_flow"
+    OPERATING_CASH_FLOW = "operating_cash_flow"
+    INVESTING_CASH_FLOW = "investing_cash_flow"
+    FINANCING_CASH_FLOW = "financing_cash_flow"
+    CAPITAL_EXPENDITURE = "capital_expenditure"
+    DEPRECIATION_AND_AMORTIZATION = "depreciation_and_amortization"
+    WORKING_CAPITAL = "working_capital"
+    DIVIDENDS_AND_OTHER_CASH_DISTRIBUTIONS = "dividends_and_other_cash_distributions"
+    ISSUANCE_OR_PURCHASE_OF_EQUITY_SHARES = "issuance_or_purchase_of_equity_shares"
+    
+    # Per Share Metrics
+    EARNINGS_PER_SHARE = "earnings_per_share"
+    BOOK_VALUE_PER_SHARE = "book_value_per_share"
+    REVENUE_PER_SHARE = "revenue_per_share"
+    FREE_CASH_FLOW_PER_SHARE = "free_cash_flow_per_share"
+    DIVIDENDS_PER_SHARE = "dividends_per_share"
+    
+    # Share Information
+    OUTSTANDING_SHARES = "outstanding_shares"
+    SHARES_OUTSTANDING = "shares_outstanding"
+    BASIC_SHARES_OUTSTANDING = "basic_shares_outstanding"
+    DILUTED_SHARES_OUTSTANDING = "diluted_shares_outstanding"
+    
+    # Margins & Ratios
+    GROSS_MARGIN = "gross_margin"
+    OPERATING_MARGIN = "operating_margin"
+    NET_MARGIN = "net_margin"
+    CURRENT_RATIO = "current_ratio"
+    DEBT_TO_EQUITY_RATIO = "debt_to_equity_ratio"
+    RETURN_ON_EQUITY = "return_on_equity"
+    RETURN_ON_ASSETS = "return_on_assets"
+    
+    # Additional Calculated Metrics
+    ENTERPRISE_VALUE = "enterprise_value"
+    MARKET_CAPITALIZATION = "market_capitalization"
+    PRICE_TO_EARNINGS_RATIO = "price_to_earnings_ratio"
+    PRICE_TO_BOOK_RATIO = "price_to_book_ratio"
+    PRICE_TO_SALES_RATIO = "price_to_sales_ratio"
