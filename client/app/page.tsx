@@ -10,7 +10,7 @@ export default function Home() {
 
   const handleSubmit = async (data: AnalysisRequest) => {
     try {
-      const response = await fetch('/api/generate_analysis', {
+      const response = await fetch('/api/analysis/generate', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -34,7 +34,7 @@ export default function Home() {
         <h1 className="text-3xl font-bold">AI Hedge Fund Analysis</h1>
         <p className="text-gray-600">Generate investment analysis using AI-powered insights from legendary investors.</p>
         <AnalysisForm onSubmit={handleSubmit} isLoading={isLoading} />
-        
+
         {isLoading && (
           <div className="w-full mt-4">
             <div className="flex items-center justify-between mb-2">
@@ -44,8 +44,8 @@ export default function Home() {
               <span className="text-sm text-gray-500">{progress.analyst_progress}</span>
             </div>
             <div className="w-full bg-gray-200 rounded-full h-2.5">
-              <div 
-                className="bg-blue-600 h-2.5 rounded-full transition-all duration-300" 
+              <div
+                className="bg-blue-600 h-2.5 rounded-full transition-all duration-300"
                 style={{ width: `${progress.progress || 0}%` }}
               ></div>
             </div>

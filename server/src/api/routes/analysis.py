@@ -20,7 +20,7 @@ def generate_analysis():
 def health_check():
     """Health check endpoint for analysis service."""
     return {
-        'status': 'healthy', 
+        'status': 'healthy',
         'service': 'analysis',
         'timestamp': datetime.now().isoformat()
-    }, 200 
+    }, 200
