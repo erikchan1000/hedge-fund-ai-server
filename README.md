@@ -24,6 +24,7 @@ poetry install
 OPENAI_API_KEY=your_openai_api_key
 ALPACA_API_KEY=your_alpaca_api_key
 ALPACA_API_SECRET=your_alpaca_api_secret
+POLYGON_API_KEY=your_polygon_api_key <- recommended
 ```
 
 4. Start the server:
