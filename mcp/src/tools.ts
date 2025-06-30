@@ -1,40 +1,33 @@
-import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
-  Tool,
-} from '@modelcontextprotocol/sdk/types.js';
-import { HedgeFundAIClient } from './client.js';
+} from "@modelcontextprotocol/sdk/types.js";
+import { HedgeFundAIClient } from "./client.js";
 import {
   GenerateAnalysisToolSchema,
   GetHealthToolSchema,
   GetSystemStatusToolSchema,
-  GetPortfolioStatusToolSchema,
-  GetAvailableAnalystsToolSchema,
   SearchTickersToolSchema,
   GenerateAnalysisTool,
   GetHealthTool,
   GetSystemStatusTool,
-  GetPortfolioStatusTool,
-  GetAvailableAnalystsTool,
-  SearchTickersTool
-} from './types.js';
+  SearchTickersTool,
+} from "./types.js";
 
 export class HedgeFundAITools {
   private server: Server;
   private client: HedgeFundAIClient;
 
   constructor() {
-    this.server = new Server(
-      {
-        name: 'hedge-fund-ai-tools',
-        version: '1.0.0',
-        capabilities: {
-          tools: {},
-        },
-      }
-    );
+    this.server = new Server({
+      name: "hedge-fund-ai-tools",
+      version: "1.0.0",
+      capabilities: {
+        tools: {},
+      },
+    });
 
     this.client = new HedgeFundAIClient();
 
@@ -46,60 +39,61 @@ export class HedgeFundAITools {
       return {
         tools: [
           {
-            name: 'generate_analysis',
-            description: 'Generate comprehensive hedge fund analysis using multiple AI analysts',
+            name: "generate_analysis",
+            description:
+              "Generate comprehensive hedge fund analysis using multiple AI analysts",
             inputSchema: GenerateAnalysisToolSchema,
           },
           {
-            name: 'get_health',
-            description: 'Check the health status of the hedge fund AI server',
+            name: "get_health",
+            description: "Check the health status of the hedge fund AI server",
             inputSchema: GetHealthToolSchema,
           },
           {
-            name: 'get_system_status',
-            description: 'Get comprehensive system status and available endpoints',
+            name: "get_system_status",
+            description:
+              "Get comprehensive system status and available endpoints",
             inputSchema: GetSystemStatusToolSchema,
           },
           {
-            name: 'get_available_analysts',
-            description: 'Get list of available AI analysts for analysis',
-            inputSchema: GetAvailableAnalystsToolSchema,
+            name: "get_available_analysts",
+            description: "Get list of available AI analysts for analysis",
           },
           {
-            name: 'search_tickers',
-            description: 'Search for stock ticker symbols',
+            name: "search_tickers",
+            description: "Search for stock ticker symbols",
             inputSchema: SearchTickersToolSchema,
           },
         ],
       };
     });
 
-    this.server.setRequestHandler(CallToolRequestSchema, async (request: any) => {
-      const { name, arguments: args } = request.params;
+    this.server.setRequestHandler(
+      CallToolRequestSchema,
+      async (request: any) => {
+        const { name, arguments: args } = request.params;
 
-      switch (name) {
-        case 'generate_analysis':
-          return this.handleGenerateAnalysis(args as GenerateAnalysisTool);
+        switch (name) {
+          case "generate_analysis":
+            return this.handleGenerateAnalysis(args as GenerateAnalysisTool);
 
-        case 'get_health':
-          return this.handleGetHealth(args as GetHealthTool);
+          case "get_health":
+            return this.handleGetHealth(args as GetHealthTool);
 
-        case 'get_system_status':
-          return this.handleGetSystemStatus(args as GetSystemStatusTool);
+          case "get_system_status":
+            return this.handleGetSystemStatus(args as GetSystemStatusTool);
 
-        case 'get_portfolio_status':
-          return this.handleGetPortfolioStatus(args as GetPortfolioStatusTool);
+          case "get_available_analysts":
+            return this.handleGetAvailableAnalysts();
 
-        case 'get_available_analysts':
-          return this.handleGetAvailableAnalysts(args as GetAvailableAnalystsTool);
+          case "search_tickers":
+            return this.handleSearchTickers(args as SearchTickersTool);
 
-        case 'search_tickers':
-          return this.handleSearchTickers(args as SearchTickersTool);
-
-        default:
-          throw new Error(`Unknown tool: ${name}`);
-      }
-    });
+          default:
+            throw new Error(`Unknown tool: ${name}`);
+        }
+      },
+    );
   }
 
   private async handleGenerateAnalysis(args: GenerateAnalysisTool) {
@@ -113,7 +107,7 @@ export class HedgeFundAITools {
         show_reasoning: args.show_reasoning ?? false,
         selected_analysts: args.selected_analysts,
         model_name: args.model_name ?? "gpt-4o",
-        model_provider: args.model_provider ?? "OpenAI"
+        model_provider: args.model_provider ?? "OpenAI",
       });
 
       const results: any[] = [];
@@ -124,19 +118,19 @@ export class HedgeFundAITools {
       return {
         content: [
           {
-            type: 'text',
-            text: JSON.stringify(results, null, 2)
-          }
-        ]
+            type: "text",
+            text: JSON.stringify(results, null, 2),
+          },
+        ],
       };
     } catch (error) {
       return {
         content: [
           {
-            type: 'text',
-            text: `Error generating analysis: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }
-        ]
+            type: "text",
+            text: `Error generating analysis: ${error instanceof Error ? error.message : "Unknown error"}`,
+          },
+        ],
       };
     }
   }
@@ -147,19 +141,19 @@ export class HedgeFundAITools {
       return {
         content: [
           {
-            type: 'text',
-            text: JSON.stringify(health, null, 2)
-          }
-        ]
+            type: "text",
+            text: JSON.stringify(health, null, 2),
+          },
+        ],
       };
     } catch (error) {
       return {
         content: [
           {
-            type: 'text',
-            text: `Error getting health status: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }
-        ]
+            type: "text",
+            text: `Error getting health status: ${error instanceof Error ? error.message : "Unknown error"}`,
+          },
+        ],
       };
     }
   }
@@ -170,65 +164,42 @@ export class HedgeFundAITools {
       return {
         content: [
           {
-            type: 'text',
-            text: JSON.stringify(status, null, 2)
-          }
-        ]
+            type: "text",
+            text: JSON.stringify(status, null, 2),
+          },
+        ],
       };
     } catch (error) {
       return {
         content: [
           {
-            type: 'text',
-            text: `Error getting system status: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }
-        ]
+            type: "text",
+            text: `Error getting system status: ${error instanceof Error ? error.message : "Unknown error"}`,
+          },
+        ],
       };
     }
   }
 
-  private async handleGetPortfolioStatus(args: GetPortfolioStatusTool) {
-    try {
-      const status = await this.client.getPortfolioStatus();
-      return {
-        content: [
-          {
-            type: 'text',
-            text: JSON.stringify(status, null, 2)
-          }
-        ]
-      };
-    } catch (error) {
-      return {
-        content: [
-          {
-            type: 'text',
-            text: `Error getting portfolio status: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }
-        ]
-      };
-    }
-  }
-
-  private async handleGetAvailableAnalysts(args: GetAvailableAnalystsTool) {
+  private async handleGetAvailableAnalysts() {
     try {
       const analysts = await this.client.getAvailableAnalysts();
       return {
         content: [
           {
-            type: 'text',
-            text: JSON.stringify(analysts, null, 2)
-          }
-        ]
+            type: "text",
+            text: JSON.stringify(analysts, null, 2),
+          },
+        ],
       };
     } catch (error) {
       return {
         content: [
           {
-            type: 'text',
-            text: `Error getting available analysts: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }
-        ]
+            type: "text",
+            text: `Error getting available analysts: ${error instanceof Error ? error.message : "Unknown error"}`,
+          },
+        ],
       };
     }
   }
@@ -237,24 +208,24 @@ export class HedgeFundAITools {
     try {
       const tickers = await this.client.searchTickers(args.query);
       // Validate the response using the schema
-      const { TickerSearchResultsSchema } = await import('./types.js');
+      const { TickerSearchResultsSchema } = await import("./types.js");
       const validated = TickerSearchResultsSchema.parse(tickers);
       return {
         content: [
           {
-            type: 'text',
-            text: JSON.stringify(validated, null, 2)
-          }
-        ]
+            type: "text",
+            text: JSON.stringify(validated, null, 2),
+          },
+        ],
       };
     } catch (error) {
       return {
         content: [
           {
-            type: 'text',
-            text: `Error searching tickers: ${error instanceof Error ? error.message : 'Unknown error'}`
-          }
-        ]
+            type: "text",
+            text: `Error searching tickers: ${error instanceof Error ? error.message : "Unknown error"}`,
+          },
+        ],
       };
     }
   }
@@ -262,7 +233,7 @@ export class HedgeFundAITools {
   async run() {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    console.error('Hedge Fund AI MCP server started');
+    console.error("Hedge Fund AI MCP server started");
   }
 }
 
@@ -270,4 +241,4 @@ export class HedgeFundAITools {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const tools = new HedgeFundAITools();
   tools.run().catch(console.error);
-} 
+}
