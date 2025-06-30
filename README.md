@@ -9,11 +9,11 @@ This project consists of a Python backend server and a Next.js frontend client f
 
 ## Features
 
-🤖 **13+ AI Analyst Agents** - Warren Buffett, Peter Lynch, Charlie Munger, and more
-📊 **Real-time Financial Data** - Polygon.io, Finnhub, Alpaca integration  
-🔄 **Model Context Protocol** - Direct integration with Claude Desktop and other AI assistants
-📈 **Advanced Analytics** - Financial ratios, sentiment analysis, risk management
-⚡ **Streaming Analysis** - Real-time progress updates during analysis
+- 🤖 **13+ AI Analyst Agents** - Warren Buffett, Peter Lynch, Charlie Munger, and more
+- 📊 **Real-time Financial Data** - Polygon.io, Finnhub, Alpaca integration  
+- 🔄 **Model Context Protocol** - Direct integration with Claude Desktop and other AI assistants
+- 📈 **Advanced Analytics** - Financial ratios, sentiment analysis, risk management
+- ⚡ **Streaming Analysis** - Real-time progress updates during analysis
 
 ## Server Setup
 
