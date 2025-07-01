@@ -1,0 +1,55 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Flask Server (Debug)",
+            "type": "python",
+            "request": "launch",
+            "module": "flask",
+            "env": {
+                "FLASK_APP": "src/app.py",
+                "FLASK_ENV": "development",
+                "FLASK_DEBUG": "1",
+                "PYTHONPATH": "${workspaceFolder}",
+                "PORT": "5000"
+            },
+            "args": [
+                "run",
+                "--host=0.0.0.0",
+                "--port=5000",
+                "--no-debugger",
+                "--no-reload"
+            ],
+            "jinja": true,
+            "justMyCode": false,
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Flask Server (Production Mode)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/src/app.py",
+            "env": {
+                "FLASK_ENV": "production",
+                "PYTHONPATH": "${workspaceFolder}",
+                "PORT": "5000"
+            },
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "Test Polygon Financials (Debug)",
+            "type": "python",
+            "request": "launch",
+            "program": "${workspaceFolder}/test_polygon_financials.py",
+            "env": {
+                "PYTHONPATH": "${workspaceFolder}"
+            },
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+} 
