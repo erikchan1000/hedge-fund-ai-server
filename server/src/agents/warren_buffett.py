@@ -191,8 +191,8 @@ def analyze_consistency(financial_line_items: list) -> dict[str, any]:
     score = 0
     reasoning = []
 
-    # Check earnings growth trend
-    earnings_values = [item.net_income for item in financial_line_items if item.net_income]
+    # Check earnings growth trend - filter by name and get values
+    earnings_values = [item.value for item in financial_line_items if item.name == "net_income" and item.value is not None]
     if len(earnings_values) >= 4:
         # Simple check: is each period's earnings bigger than the next?
         earnings_growth = all(earnings_values[i] > earnings_values[i + 1] for i in range(len(earnings_values) - 1))
@@ -280,20 +280,29 @@ def analyze_management_quality(financial_line_items: list) -> dict[str, any]:
     reasoning = []
     mgmt_score = 0
 
-    latest = financial_line_items[0]
-    if hasattr(latest, "issuance_or_purchase_of_equity_shares") and latest.issuance_or_purchase_of_equity_shares and latest.issuance_or_purchase_of_equity_shares < 0:
+    # Get the most recent values for each line item
+    latest_issuance = None
+    latest_dividends = None
+    
+    for item in financial_line_items:
+        if item.name == "issuance_or_purchase_of_equity_shares" and latest_issuance is None:
+            latest_issuance = item.value
+        elif item.name == "dividends_and_other_cash_distributions" and latest_dividends is None:
+            latest_dividends = item.value
+    
+    if latest_issuance is not None and latest_issuance < 0:
         # Negative means the company spent money on buybacks
         mgmt_score += 1
         reasoning.append("Company has been repurchasing shares (shareholder-friendly)")
 
-    if hasattr(latest, "issuance_or_purchase_of_equity_shares") and latest.issuance_or_purchase_of_equity_shares and latest.issuance_or_purchase_of_equity_shares > 0:
+    if latest_issuance is not None and latest_issuance > 0:
         # Positive issuance means new shares => possible dilution
         reasoning.append("Recent common stock issuance (potential dilution)")
     else:
         reasoning.append("No significant new stock issuance detected")
 
     # Check for any dividends
-    if hasattr(latest, "dividends_and_other_cash_distributions") and latest.dividends_and_other_cash_distributions and latest.dividends_and_other_cash_distributions < 0:
+    if latest_dividends is not None and latest_dividends < 0:
         mgmt_score += 1
         reasoning.append("Company has a track record of paying dividends")
     else:
@@ -312,11 +321,18 @@ def calculate_owner_earnings(financial_line_items: list) -> dict[str, any]:
     if not financial_line_items or len(financial_line_items) < 1:
         return {"owner_earnings": None, "details": ["Insufficient data for owner earnings calculation"]}
 
-    latest = financial_line_items[0]
-
-    net_income = latest.net_income
-    depreciation = latest.depreciation_and_amortization
-    capex = latest.capital_expenditure
+    # Get the most recent values for each line item
+    net_income = None
+    depreciation = None
+    capex = None
+    
+    for item in financial_line_items:
+        if item.name == "net_income" and net_income is None:
+            net_income = item.value
+        elif item.name == "depreciation_and_amortization" and depreciation is None:
+            depreciation = item.value
+        elif item.name == "capital_expenditure" and capex is None:
+            capex = item.value
 
     if not all([net_income, depreciation, capex]):
         return {"owner_earnings": None, "details": ["Missing components for owner earnings calculation"]}
@@ -344,9 +360,12 @@ def calculate_intrinsic_value(financial_line_items: list) -> dict[str, any]:
 
     owner_earnings = earnings_data["owner_earnings"]
 
-    # Get current market data
-    latest_financial_line_items = financial_line_items[0]
-    shares_outstanding = latest_financial_line_items.outstanding_shares
+    # Get current market data - find shares outstanding
+    shares_outstanding = None
+    for item in financial_line_items:
+        if item.name == "outstanding_shares" and shares_outstanding is None:
+            shares_outstanding = item.value
+            break
 
     if not shares_outstanding:
         return {"intrinsic_value": None, "details": ["Missing shares outstanding data"]}

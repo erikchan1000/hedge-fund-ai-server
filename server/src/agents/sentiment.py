@@ -25,7 +25,7 @@ def sentiment_agent(state: AgentState):
         insider_trades = get_insider_trades(
             ticker=ticker,
             end_date=end_date,
-            limit=1000,
+            limit=10,
         )
 
         progress.update_status("sentiment_agent", ticker, "Analyzing trading patterns")

@@ -336,7 +336,7 @@ def search_line_items(
     line_items: List[LineItemName],
     end_date: str,
     period: FinancialPeriod = FinancialPeriod.TTM,
-    limit: int = 30
+    limit: int = 1000
 ) -> List[LineItem]:
     """Search for specific line items using definitive adapter mappings."""
     

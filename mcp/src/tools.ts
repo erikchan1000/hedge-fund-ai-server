@@ -6,15 +6,13 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { HedgeFundAIClient } from "./client.js";
 import {
-  GenerateAnalysisToolSchema,
-  GetHealthToolSchema,
-  GetSystemStatusToolSchema,
-  SearchTickersToolSchema,
   GenerateAnalysisTool,
   GetHealthTool,
   GetSystemStatusTool,
   SearchTickersTool,
 } from "./types.js";
+
+
 
 export class HedgeFundAITools {
   private server: Server;
@@ -42,27 +40,92 @@ export class HedgeFundAITools {
             name: "generate_analysis",
             description:
               "Generate comprehensive hedge fund analysis using multiple AI analysts",
-            inputSchema: GenerateAnalysisToolSchema,
+            inputSchema: {
+              type: "object",
+              properties: {
+                tickers: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "List of stock tickers to analyze"
+                },
+                start_date: {
+                  type: "string",
+                  description: "Start date for analysis (YYYY-MM-DD)"
+                },
+                end_date: {
+                  type: "string",
+                  description: "End date for analysis (YYYY-MM-DD)"
+                },
+                initial_cash: {
+                  type: "number",
+                  description: "Initial cash amount for portfolio"
+                },
+                margin_requirement: {
+                  type: "number",
+                  description: "Margin requirement percentage"
+                },
+                show_reasoning: {
+                  type: "boolean",
+                  description: "Whether to show detailed reasoning"
+                },
+                selected_analysts: {
+                  type: "array",
+                  items: { type: "string" },
+                  description: "List of analyst names to use"
+                },
+                model_name: {
+                  type: "string",
+                  description: "LLM model name to use"
+                },
+                model_provider: {
+                  type: "string",
+                  description: "LLM provider (OpenAI, etc.)"
+                }
+              },
+              required: ["tickers"]
+            },
           },
           {
             name: "get_health",
             description: "Check the health status of the hedge fund AI server",
-            inputSchema: GetHealthToolSchema,
+            inputSchema: {
+              type: "object",
+              properties: {},
+              required: []
+            },
           },
           {
             name: "get_system_status",
             description:
               "Get comprehensive system status and available endpoints",
-            inputSchema: GetSystemStatusToolSchema,
+            inputSchema: {
+              type: "object",
+              properties: {},
+              required: []
+            },
           },
           {
             name: "get_available_analysts",
             description: "Get list of available AI analysts for analysis",
+            inputSchema: {
+              type: "object",
+              properties: {},
+              required: []
+            },
           },
           {
             name: "search_tickers",
             description: "Search for stock ticker symbols",
-            inputSchema: SearchTickersToolSchema,
+            inputSchema: {
+              type: "object",
+              properties: {
+                query: {
+                  type: "string",
+                  description: "Search query for ticker symbols"
+                }
+              },
+              required: ["query"]
+            },
           },
         ],
       };

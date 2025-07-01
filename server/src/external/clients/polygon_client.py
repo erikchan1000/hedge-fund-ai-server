@@ -432,7 +432,7 @@ class PolygonClient:
                     ticker=symbol,
                     filing_date_gte=from_date,
                     filing_date_lte=to_date,
-                    limit=1000
+                    limit=10
                 ))
                 
                 # Convert to FinnHub format
@@ -486,7 +486,7 @@ class PolygonClient:
                 ticker=symbol,
                 published_utc_gte=start_date,
                 published_utc_lte=end_date,
-                limit=1000
+                limit=10
             ))
             
             # Convert to FinnHub format
@@ -767,4 +767,32 @@ class PolygonClient:
                                 "order": 100
                             }
         
-        return reference_format 
+        return reference_format
+
+    def search_tickers(self, query: str, limit: int = 20, active: bool = True) -> List[Dict[str, Any]]:
+        """Search for tickers by symbol or company name using Polygon.io Reference API."""
+        try:
+            response = self._execute_with_retry(
+                self.client.get_tickers,
+                search=query,
+                active=active,
+                limit=limit
+            )
+            results = response.get('results', [])
+            # Return a simplified list of tickers
+            return [
+                {
+                    'symbol': t.get('ticker'),
+                    'name': t.get('name'),
+                    'market': t.get('market'),
+                    'locale': t.get('locale'),
+                    'primary_exchange': t.get('primary_exchange'),
+                    'currency_name': t.get('currency_name'),
+                    'active': t.get('active'),
+                    'type': t.get('type'),
+                }
+                for t in results
+            ]
+        except Exception as e:
+            logger.error(f"Error searching tickers for query '{query}': {str(e)}")
+            return [] 
