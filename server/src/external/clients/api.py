@@ -276,7 +276,7 @@ def get_company_news(
 
     try:
         
-        data = polygon_client.get_company_news(ticker, start_date or "2020-01-01", end_date)
+        data = polygon_client.get_company_news(ticker, start_date or "2024-01-01", end_date)
 
         
         news_items = []

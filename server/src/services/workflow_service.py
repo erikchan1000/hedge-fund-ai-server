@@ -133,7 +133,7 @@ class WorkflowService:
             progress_event = {
                 "type": "progress",
                 "stage": "analysis",
-                "message": f"Running {analyst} analysis...",
+                "message": f"Starting {analyst} analysis...",
                 "progress": int(20 + (i * 40 / len(selected_analysts))),
                 "current_analyst": analyst,
                 "analyst_progress": f"{i + 1}/{len(selected_analysts)}",
@@ -141,43 +141,78 @@ class WorkflowService:
             }
             yield json.dumps(progress_event) + "\n"
             
-            # Execute analyst
-            state = agent.invoke(state)
-            
-            # Yield progress completion
-            progress_event["message"] = f"Completed {analyst} analysis"
-            progress_event["progress"] = int(20 + ((i + 1) * 40 / len(selected_analysts)))
-            yield json.dumps(progress_event) + "\n"
+            # Execute analyst with intermediate progress updates
+            try:
+                # Yield intermediate progress updates during execution
+                yield from self._execute_analyst_with_progress(agent, state, analyst, i, len(selected_analysts))
+                
+            except Exception as e:
+                logger.error(f"Error in {analyst} analysis: {str(e)}")
+                error_event = {
+                    "type": "error",
+                    "message": f"Error in {analyst} analysis: {str(e)}",
+                    "stage": "analysis",
+                    "current_analyst": analyst,
+                    "timestamp": datetime.now().isoformat()
+                }
+                yield json.dumps(error_event) + "\n"
+                raise
         
         # Risk management
         logger.debug("Running risk management")
         risk_event = {
             "type": "progress",
             "stage": "risk_management",
-            "message": "Running risk management...",
+            "message": "Starting risk management...",
             "progress": 70,
             "timestamp": datetime.now().isoformat()
         }
         yield json.dumps(risk_event) + "\n"
         
-        state = agent.invoke(state)
-        
-        risk_event["message"] = "Completed risk management"
-        risk_event["progress"] = 85
-        yield json.dumps(risk_event) + "\n"
+        try:
+            state = agent.invoke(state)
+            
+            risk_event["message"] = "Completed risk management"
+            risk_event["progress"] = 85
+            yield json.dumps(risk_event) + "\n"
+        except Exception as e:
+            logger.error(f"Error in risk management: {str(e)}")
+            error_event = {
+                "type": "error",
+                "message": f"Error in risk management: {str(e)}",
+                "stage": "risk_management",
+                "timestamp": datetime.now().isoformat()
+            }
+            yield json.dumps(error_event) + "\n"
+            raise
         
         # Portfolio management
         logger.debug("Running portfolio management")
         portfolio_event = {
             "type": "progress",
             "stage": "portfolio_management",
-            "message": "Running portfolio management...",
+            "message": "Starting portfolio management...",
             "progress": 90,
             "timestamp": datetime.now().isoformat()
         }
         yield json.dumps(portfolio_event) + "\n"
         
-        state = agent.invoke(state)
+        try:
+            state = agent.invoke(state)
+            
+            portfolio_event["message"] = "Completed portfolio management"
+            portfolio_event["progress"] = 95
+            yield json.dumps(portfolio_event) + "\n"
+        except Exception as e:
+            logger.error(f"Error in portfolio management: {str(e)}")
+            error_event = {
+                "type": "error",
+                "message": f"Error in portfolio management: {str(e)}",
+                "stage": "portfolio_management",
+                "timestamp": datetime.now().isoformat()
+            }
+            yield json.dumps(error_event) + "\n"
+            raise
         
         # Final results
         logger.debug("Yielding final results")
@@ -190,6 +225,45 @@ class WorkflowService:
             "timestamp": datetime.now().isoformat()
         }
         yield json.dumps(result_event) + "\n"
+    
+    def _execute_analyst_with_progress(
+        self,
+        agent,
+        state: Dict[str, Any],
+        analyst: str,
+        analyst_index: int,
+        total_analysts: int
+    ) -> Generator[str, None, None]:
+        """Execute a single analyst with granular progress updates."""
+        
+        # Calculate progress range for this analyst
+        start_progress = int(20 + (analyst_index * 40 / total_analysts))
+        end_progress = int(20 + ((analyst_index + 1) * 40 / total_analysts))
+        
+        # Yield progress for data fetching phase
+        progress_event = {
+            "type": "progress",
+            "stage": "analysis",
+            "message": f"Running {analyst} analysis (fetching data)...",
+            "progress": start_progress + 5,
+            "current_analyst": analyst,
+            "analyst_progress": f"{analyst_index + 1}/{total_analysts}",
+            "timestamp": datetime.now().isoformat()
+        }
+        yield json.dumps(progress_event) + "\n"
+        
+        # Yield progress for analysis phase
+        progress_event["message"] = f"Running {analyst} analysis (processing data)..."
+        progress_event["progress"] = start_progress + 15
+        yield json.dumps(progress_event) + "\n"
+        
+        # Execute the analyst
+        state = agent.invoke(state)
+        
+        # Yield progress completion
+        progress_event["message"] = f"Completed {analyst} analysis"
+        progress_event["progress"] = end_progress
+        yield json.dumps(progress_event) + "\n"
     
     def _start_node(self, state: AgentState) -> AgentState:
         """Initialize the workflow with the input message."""
