@@ -1,9 +1,9 @@
 from typing import Dict, Any
 from flask import request, jsonify, Response, stream_with_context
-from services.analysis_service import AnalysisService
-from models.dto.requests import AnalysisRequestDTO
-from core.exceptions import ValidationError, BusinessLogicError
-from utils.validators import validate_analysis_request
+from src.services.analysis_service import AnalysisService
+from src.models.dto.requests import AnalysisRequestDTO
+from src.core.exceptions import ValidationError, BusinessLogicError
+from src.utils.validators import validate_analysis_request
 import logging
 import json
 from datetime import datetime
@@ -38,6 +38,7 @@ class AnalysisController:
                         "progress": 0,
                         "timestamp": datetime.now().isoformat()
                     }
+                    print(f"initial_progress: {initial_progress}")
                     yield f"data: {json.dumps(initial_progress)}\n\n".encode('utf-8')
                     
                     # Get the analysis stream

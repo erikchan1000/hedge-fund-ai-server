@@ -1,7 +1,7 @@
 from langchain_core.messages import HumanMessage
-from graph.state import AgentState, show_agent_reasoning
-from utils.progress import progress
-from external.clients.api import get_prices, prices_to_df
+from src.graph.state import AgentState, show_agent_reasoning
+from src.utils.progress import progress
+from src.external.clients.api import get_prices, prices_to_df
 import json
 
 
@@ -78,6 +78,6 @@ def risk_management_agent(state: AgentState):
     state["data"]["analyst_signals"]["risk_management_agent"] = risk_analysis
 
     return {
-        "messages": state["messages"] + [message],
-        "data": data,
+        "messages": [message],
+        "data": state["data"],
     } 

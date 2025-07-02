@@ -1,5 +1,5 @@
 from flask import Flask
-from api import init_app
+from src.api import init_app
 import os
 from werkzeug.middleware.proxy_fix import ProxyFix
 

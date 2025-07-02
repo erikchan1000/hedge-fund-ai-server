@@ -4,20 +4,21 @@ from datetime import datetime, timedelta
 import json
 from typing_extensions import Literal
 
-from graph.state import AgentState, show_agent_reasoning
+from src.graph.state import AgentState, show_agent_reasoning
 from langchain_core.messages import HumanMessage
 from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel
 
-from external.clients.api import (
+from src.external.clients.api import (
     get_company_news,
     get_financial_metrics,
     get_insider_trades,
     get_market_cap,
     search_line_items,
 )
-from utils.llm import call_llm
-from utils.progress import progress
+from src.utils.llm import call_llm
+from src.utils.progress import progress
+from src.utils.streaming import with_streaming_progress, emit_ticker_progress
 
 __all__ = [
     "MichaelBurrySignal",
@@ -42,6 +43,7 @@ class MichaelBurrySignal(BaseModel):
 ###############################################################################
 
 
+@with_streaming_progress("michael_burry")
 def michael_burry_agent(state: AgentState):  # noqa: C901  (complexity is fine here)
     """Analyse stocks using Michael Burry's deep‑value, contrarian framework."""
 

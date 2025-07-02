@@ -1,5 +1,5 @@
-from graph.state import AgentState, show_agent_reasoning
-from external.clients.api import (
+from src.graph.state import AgentState, show_agent_reasoning
+from src.external.clients.api import (
     get_financial_metrics,
     get_market_cap,
     search_line_items,
@@ -11,8 +11,9 @@ from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 import json
 from typing_extensions import Literal
-from utils.progress import progress
-from utils.llm import call_llm
+from src.utils.progress import progress
+from src.utils.llm import call_llm
+from src.utils.streaming import with_streaming_progress, emit_ticker_progress
 import statistics
 
 
@@ -22,6 +23,7 @@ class PhilFisherSignal(BaseModel):
     reasoning: str
 
 
+@with_streaming_progress("phil_fisher")
 def phil_fisher_agent(state: AgentState):
     """
     Analyzes stocks using Phil Fisher's investing principles:

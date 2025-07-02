@@ -1,14 +1,16 @@
 from langchain_core.messages import HumanMessage
-from graph.state import AgentState, show_agent_reasoning
-from utils.progress import progress
+from src.graph.state import AgentState, show_agent_reasoning
+from src.utils.progress import progress
 import pandas as pd
 import numpy as np
 import json
 
-from external.clients.api import get_insider_trades, get_company_news
+from src.external.clients.api import get_insider_trades, get_company_news
+from src.utils.streaming import with_streaming_progress, emit_ticker_progress
 
 
 ##### Sentiment Agent #####
+@with_streaming_progress("sentiment")
 def sentiment_agent(state: AgentState):
     """Analyzes market sentiment and generates trading signals for multiple tickers."""
     data = state.get("data", {})

@@ -1,12 +1,14 @@
-from graph.state import AgentState, show_agent_reasoning
+from src.graph.state import AgentState, show_agent_reasoning
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 import json
 from typing_extensions import Literal
-from external.clients.api import get_financial_metrics, get_market_cap, search_line_items
-from utils.llm import call_llm
-from utils.progress import progress
+from datetime import datetime
+from src.external.clients.api import get_financial_metrics, get_market_cap, search_line_items
+from src.utils.llm import call_llm
+from src.utils.progress import progress
+from src.utils.streaming import with_streaming_progress, emit_ticker_progress
 
 
 class WarrenBuffettSignal(BaseModel):
@@ -15,6 +17,7 @@ class WarrenBuffettSignal(BaseModel):
     reasoning: str
 
 
+@with_streaming_progress("warren_buffett")
 def warren_buffett_agent(state: AgentState):
     """Analyzes stocks using Buffett's principles and LLM reasoning."""
     data = state["data"]
@@ -26,10 +29,12 @@ def warren_buffett_agent(state: AgentState):
     buffett_analysis = {}
 
     for ticker in tickers:
+        emit_ticker_progress(ticker, "Fetching financial metrics", "warren_buffett")
         progress.update_status("warren_buffett_agent", ticker, "Fetching financial metrics")
         # Fetch required data
         metrics = get_financial_metrics(ticker, end_date, period="ttm", limit=5)
 
+        emit_ticker_progress(ticker, "Gathering financial line items", "warren_buffett")
         progress.update_status("warren_buffett_agent", ticker, "Gathering financial line items")
         financial_line_items = search_line_items(
             ticker,
@@ -50,6 +55,7 @@ def warren_buffett_agent(state: AgentState):
         # Get current market cap
         market_cap = get_market_cap(ticker, end_date)
 
+        emit_ticker_progress(ticker, "Analyzing fundamentals", "warren_buffett")
         progress.update_status("warren_buffett_agent", ticker, "Analyzing fundamentals")
         # Analyze fundamentals
         fundamental_analysis = analyze_fundamentals(metrics)
@@ -104,6 +110,7 @@ def warren_buffett_agent(state: AgentState):
             "margin_of_safety": margin_of_safety,
         }
 
+        emit_ticker_progress(ticker, "Generating Warren Buffett analysis", "warren_buffett")
         progress.update_status("warren_buffett_agent", ticker, "Generating Warren Buffett analysis")
         buffett_output = generate_buffett_output(
             ticker=ticker,

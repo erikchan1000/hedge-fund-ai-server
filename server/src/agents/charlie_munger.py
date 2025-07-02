@@ -1,12 +1,13 @@
-from graph.state import AgentState, show_agent_reasoning
-from external.clients.api import get_financial_metrics, get_market_cap, search_line_items, get_insider_trades, get_company_news
+from src.graph.state import AgentState, show_agent_reasoning
+from src.external.clients.api import get_financial_metrics, get_market_cap, search_line_items, get_insider_trades, get_company_news
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 import json
 from typing_extensions import Literal
-from utils.progress import progress
-from utils.llm import call_llm
+from src.utils.progress import progress
+from src.utils.llm import call_llm
+from src.utils.streaming import with_streaming_progress, emit_ticker_progress
 
 class CharlieMungerSignal(BaseModel):
     signal: Literal["bullish", "bearish", "neutral"]
@@ -14,6 +15,7 @@ class CharlieMungerSignal(BaseModel):
     reasoning: str
 
 
+@with_streaming_progress("charlie_munger")
 def charlie_munger_agent(state: AgentState):
     """
     Analyzes stocks using Charlie Munger's investing principles and mental models.

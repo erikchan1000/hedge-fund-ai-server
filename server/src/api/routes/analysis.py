@@ -4,9 +4,8 @@ import sys
 import os
 from datetime import datetime
 import time
+from src.controllers.analysis_controller import AnalysisController
 
-
-from controllers.analysis_controller import AnalysisController
 
 analysis_bp = Blueprint('analysis', __name__, url_prefix='/api/analysis')
 

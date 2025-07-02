@@ -6,7 +6,7 @@ import logging
 import threading
 from typing import TypeVar, Type, Optional, Any
 from pydantic import BaseModel
-from utils.progress import progress
+from src.utils.progress import progress
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
