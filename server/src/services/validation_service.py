@@ -2,9 +2,9 @@ from typing import List, Dict, Any
 from datetime import datetime, timedelta
 import logging
 
-from models.dto.requests import AnalysisRequestDTO
-from core.exceptions import ValidationError
-from utils.analysts import ANALYST_CONFIG
+from src.models.dto.requests import AnalysisRequestDTO
+from src.core.exceptions import ValidationError
+from src.utils.analysts import ANALYST_CONFIG
 
 logger = logging.getLogger(__name__)
 

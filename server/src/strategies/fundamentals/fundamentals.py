@@ -1,12 +1,14 @@
 from langchain_core.messages import HumanMessage
-from graph.state import AgentState, show_agent_reasoning
-from utils.progress import progress
+from src.graph.state import AgentState, show_agent_reasoning
+from src.utils.progress import progress
 import json
 
-from external.clients.api import get_financial_metrics
+from src.external.clients.api import get_financial_metrics
+from src.utils.streaming import with_streaming_progress, emit_ticker_progress
 
 
 ##### Fundamental Agent #####
+@with_streaming_progress("fundamentals")
 def fundamentals_agent(state: AgentState):
     """Analyzes fundamental data and generates trading signals for multiple tickers."""
     data = state["data"]

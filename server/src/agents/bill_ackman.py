@@ -1,13 +1,14 @@
 from langchain_openai import ChatOpenAI
-from graph.state import AgentState, show_agent_reasoning
-from external.clients.api import get_financial_metrics, get_market_cap, search_line_items
+from src.graph.state import AgentState, show_agent_reasoning
+from src.external.clients.api import get_financial_metrics, get_market_cap, search_line_items
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
 import json
 from typing_extensions import Literal
-from utils.progress import progress
-from utils.llm import call_llm
+from src.utils.progress import progress
+from src.utils.llm import call_llm
+from src.utils.streaming import with_streaming_progress, emit_ticker_progress
 
 
 class BillAckmanSignal(BaseModel):
@@ -16,6 +17,7 @@ class BillAckmanSignal(BaseModel):
     reasoning: str
 
 
+@with_streaming_progress("bill_ackman")
 def bill_ackman_agent(state: AgentState):
     """
     Analyzes stocks using Bill Ackman's investing principles and LLM reasoning.

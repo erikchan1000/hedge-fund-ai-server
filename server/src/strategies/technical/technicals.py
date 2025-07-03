@@ -2,17 +2,19 @@ import math
 
 from langchain_core.messages import HumanMessage
 
-from graph.state import AgentState, show_agent_reasoning
+from src.graph.state import AgentState, show_agent_reasoning
 
 import json
 import pandas as pd
 import numpy as np
 
-from external.clients.api import get_prices, prices_to_df
-from utils.progress import progress
+from src.external.clients.api import get_prices, prices_to_df
+from src.utils.progress import progress
+from src.utils.streaming import with_streaming_progress, emit_ticker_progress
 
 
 ##### Technical Analyst #####
+@with_streaming_progress("technical_analyst")
 def technical_analyst_agent(state: AgentState):
     """
     Sophisticated technical analysis system that combines multiple trading strategies for multiple tickers:
@@ -130,8 +132,8 @@ def technical_analyst_agent(state: AgentState):
     state["data"]["analyst_signals"]["technical_analyst_agent"] = technical_analysis
 
     return {
-        "messages": state["messages"] + [message],
-        "data": data,
+        "messages": [message],
+        "data": state["data"],
     }
 
 

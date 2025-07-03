@@ -6,11 +6,11 @@ from datetime import datetime
 from langchain_core.messages import HumanMessage
 from langgraph.graph import END, StateGraph
 
-from strategies.risk.risk_manager import risk_management_agent
-from strategies.portfolio.portfolio_manager import portfolio_management_agent
-from core.exceptions import BusinessLogicError
-from utils.analysts import get_analyst_nodes
-from graph.state import AgentState
+from src.strategies.risk.risk_manager import risk_management_agent
+from src.strategies.portfolio.portfolio_manager import portfolio_management_agent
+from src.core.exceptions import BusinessLogicError
+from src.utils.analysts import get_analyst_nodes
+from src.graph.state import AgentState
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +32,14 @@ class WorkflowService:
         model_provider: str = "OpenAI"
     ) -> Generator[str, None, None]:
         """Execute the complete analysis workflow."""
+        
+        # Debug yield to ensure generator is working
+        debug_event = {
+            "type": "debug",
+            "message": "Workflow generator started",
+            "timestamp": datetime.now().isoformat()
+        }
+        yield json.dumps(debug_event) + "\n"
         
         try:
             # Create or get compiled workflow
@@ -123,73 +131,117 @@ class WorkflowService:
         state: Dict[str, Any],
         selected_analysts: List[str]
     ) -> Generator[str, None, None]:
-        """Execute workflow with progress updates."""
+        """Execute workflow with progress updates using LangGraph's streaming API."""
         
-        # Progress for each analyst
-        for i, analyst in enumerate(selected_analysts):
-            logger.debug(f"Running {analyst} analysis")
+        # Initial progress
+        progress_event = {
+            "type": "progress",
+            "stage": "initialization",
+            "message": "Starting analysis workflow...",
+            "progress": 10,
+            "timestamp": datetime.now().isoformat()
+        }
+        yield json.dumps(progress_event) + "\n"
+        
+        try:
+            # Execute the workflow using LangGraph's streaming API
+            logger.debug("Executing workflow with LangGraph streaming")
             
-            # Yield progress start
-            progress_event = {
+            # Track progress through the workflow
+            total_steps = len(selected_analysts) + 3  # analysts + risk + portfolio + start
+            current_step = 0
+            
+            # Use LangGraph's stream method with "custom" stream_mode to get custom progress updates
+            for step in agent.stream(state, stream_mode="custom"):
+                current_step += 1
+                progress_percent = int(10 + (current_step * 80 / total_steps))
+                
+                # Extract the node name from the step
+                if step and len(step) > 0:
+                    node_name = list(step.keys())[0]
+                    
+                    if node_name == "start_node":
+                        progress_event = {
+                            "type": "progress",
+                            "stage": "start",
+                            "message": "Initializing workflow...",
+                            "progress": progress_percent,
+                            "timestamp": datetime.now().isoformat()
+                        }
+                    elif node_name.endswith("_agent") and node_name != "risk_management_agent" and node_name != "portfolio_management_agent":
+                        # This is an analyst step
+                        analyst_name = node_name.replace("_agent", "")
+                        progress_event = {
+                            "type": "progress",
+                            "stage": "analysis",
+                            "message": f"Running {analyst_name} analysis...",
+                            "progress": progress_percent,
+                            "current_analyst": analyst_name,
+                            "analyst_progress": f"{current_step}/{total_steps}",
+                            "timestamp": datetime.now().isoformat()
+                        }
+                    elif node_name == "risk_management_agent":
+                        progress_event = {
+                            "type": "progress",
+                            "stage": "risk_management",
+                            "message": "Running risk management...",
+                            "progress": progress_percent,
+                            "timestamp": datetime.now().isoformat()
+                        }
+                    elif node_name == "portfolio_management_agent":
+                        progress_event = {
+                            "type": "progress",
+                            "stage": "portfolio_management",
+                            "message": "Running portfolio management...",
+                            "progress": progress_percent,
+                            "timestamp": datetime.now().isoformat()
+                        }
+                    else:
+                        progress_event = {
+                            "type": "progress",
+                            "stage": "execution",
+                            "message": f"Executing {node_name}...",
+                            "progress": progress_percent,
+                            "timestamp": datetime.now().isoformat()
+                        }
+                    
+                    yield json.dumps(progress_event) + "\n"
+            
+            # Yield completion
+            completion_event = {
                 "type": "progress",
-                "stage": "analysis",
-                "message": f"Running {analyst} analysis...",
-                "progress": int(20 + (i * 40 / len(selected_analysts))),
-                "current_analyst": analyst,
-                "analyst_progress": f"{i + 1}/{len(selected_analysts)}",
+                "stage": "completion",
+                "message": "Analysis completed",
+                "progress": 95,
                 "timestamp": datetime.now().isoformat()
             }
-            yield json.dumps(progress_event) + "\n"
+            yield json.dumps(completion_event) + "\n"
             
-            # Execute analyst
-            state = agent.invoke(state)
+            # Get the final results using invoke
+            final_state = agent.invoke(state)
             
-            # Yield progress completion
-            progress_event["message"] = f"Completed {analyst} analysis"
-            progress_event["progress"] = int(20 + ((i + 1) * 40 / len(selected_analysts)))
-            yield json.dumps(progress_event) + "\n"
-        
-        # Risk management
-        logger.debug("Running risk management")
-        risk_event = {
-            "type": "progress",
-            "stage": "risk_management",
-            "message": "Running risk management...",
-            "progress": 70,
-            "timestamp": datetime.now().isoformat()
-        }
-        yield json.dumps(risk_event) + "\n"
-        
-        state = agent.invoke(state)
-        
-        risk_event["message"] = "Completed risk management"
-        risk_event["progress"] = 85
-        yield json.dumps(risk_event) + "\n"
-        
-        # Portfolio management
-        logger.debug("Running portfolio management")
-        portfolio_event = {
-            "type": "progress",
-            "stage": "portfolio_management",
-            "message": "Running portfolio management...",
-            "progress": 90,
-            "timestamp": datetime.now().isoformat()
-        }
-        yield json.dumps(portfolio_event) + "\n"
-        
-        state = agent.invoke(state)
-        
-        # Final results
-        logger.debug("Yielding final results")
-        result_event = {
-            "type": "result",
-            "data": {
-                "decisions": self._parse_response(state["messages"][-1].content),
-                "analyst_signals": state["data"]["analyst_signals"],
-            },
-            "timestamp": datetime.now().isoformat()
-        }
-        yield json.dumps(result_event) + "\n"
+            # Final results
+            logger.debug("Yielding final results")
+            result_event = {
+                "type": "result",
+                "data": {
+                    "decisions": self._parse_response(final_state["messages"][-1].content),
+                    "analyst_signals": final_state["data"]["analyst_signals"],
+                },
+                "timestamp": datetime.now().isoformat()
+            }
+            yield json.dumps(result_event) + "\n"
+            
+        except Exception as e:
+            logger.error(f"Error in workflow execution: {str(e)}")
+            error_event = {
+                "type": "error",
+                "message": f"Error in workflow execution: {str(e)}",
+                "stage": "execution",
+                "timestamp": datetime.now().isoformat()
+            }
+            yield json.dumps(error_event) + "\n"
+            raise
     
     def _start_node(self, state: AgentState) -> AgentState:
         """Initialize the workflow with the input message."""

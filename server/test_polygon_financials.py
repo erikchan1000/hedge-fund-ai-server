@@ -11,8 +11,8 @@ import os
 # Add the src directory to the Python path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
-from external.clients.polygon_client import PolygonClient
-from external.clients.api import search_line_items
+from src.external.clients.polygon_client import PolygonClient
+from src.external.clients.api import search_line_items
 
 # Configure logging
 logging.basicConfig(
