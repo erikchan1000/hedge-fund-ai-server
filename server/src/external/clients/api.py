@@ -88,7 +88,7 @@ def get_financial_metrics(
             return filtered_data[:limit]
 
     try:
-        from external.clients.field_adapters import PolygonFinancialAdapter
+        from src.external.clients.field_adapters import PolygonFinancialAdapter
         
         # Get company profile for market cap and currency
         profile = polygon_client.get_company_profile(ticker)
@@ -343,7 +343,7 @@ def search_line_items(
             return filtered_data[:limit]
 
     try:
-        from external.clients.field_adapters import PolygonFinancialAdapter
+        from src.external.clients.field_adapters import PolygonFinancialAdapter
         
         logger.info(f"Searching line items for {ticker}: {[item.value if hasattr(item, 'value') else str(item) for item in line_items]}")
         

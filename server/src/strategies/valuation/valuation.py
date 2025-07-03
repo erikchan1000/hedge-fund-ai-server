@@ -12,8 +12,9 @@ from langchain_core.messages import HumanMessage
 from src.graph.state import AgentState, show_agent_reasoning
 from src.utils.progress import progress
 
-from src.external.clients.api import (
 from src.utils.streaming import with_streaming_progress, emit_ticker_progress
+
+from src.external.clients.api import (
     get_financial_metrics,
     get_market_cap,
     search_line_items,

@@ -151,8 +151,8 @@ class WorkflowService:
             total_steps = len(selected_analysts) + 3  # analysts + risk + portfolio + start
             current_step = 0
             
-            # Use LangGraph's stream method with "custom" mode to get custom progress updates
-            for step in agent.stream(state, mode="custom"):
+            # Use LangGraph's stream method with "custom" stream_mode to get custom progress updates
+            for step in agent.stream(state, stream_mode="custom"):
                 current_step += 1
                 progress_percent = int(10 + (current_step * 80 / total_steps))
                 

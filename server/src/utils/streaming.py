@@ -3,12 +3,12 @@
 import functools
 from typing import Callable, Any
 from datetime import datetime
-from langgraph.graph import StreamWriter
+from langgraph.config import get_stream_writer
 
 
 def with_streaming_progress(agent_name: str = None):
     """
-    Decorator that automatically adds StreamWriter progress updates to agent functions.
+    Decorator that automatically adds stream writer progress updates to agent functions.
     
     Args:
         agent_name: Optional name for the agent. If not provided, will use the function name.
@@ -22,8 +22,8 @@ def with_streaming_progress(agent_name: str = None):
     def decorator(func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(state: Any, *args, **kwargs):
-            # Get StreamWriter for progress updates
-            writer = StreamWriter.get_current()
+            # Get stream writer for progress updates
+            writer = get_stream_writer()
             name = agent_name or func.__name__
             
             # Extract tickers from state
@@ -31,7 +31,7 @@ def with_streaming_progress(agent_name: str = None):
             
             # Emit start progress
             if writer:
-                writer.write({
+                writer({
                     "type": "progress",
                     "stage": "analysis",
                     "message": f"Starting {name} analysis...",
@@ -44,7 +44,7 @@ def with_streaming_progress(agent_name: str = None):
             
             # Emit completion progress
             if writer:
-                writer.write({
+                writer({
                     "type": "progress",
                     "stage": "analysis",
                     "message": f"Completed {name} analysis",
@@ -60,16 +60,16 @@ def with_streaming_progress(agent_name: str = None):
 
 def emit_progress(message: str, stage: str = "analysis", analyst_name: str = None):
     """
-    Utility function to emit a progress update using StreamWriter.
+    Utility function to emit a progress update using get_stream_writer.
     
     Args:
         message: The progress message
         stage: The current stage (default: "analysis")
         analyst_name: Optional analyst name
     """
-    writer = StreamWriter.get_current()
+    writer = get_stream_writer()
     if writer:
-        writer.write({
+        writer({
             "type": "progress",
             "stage": stage,
             "message": message,

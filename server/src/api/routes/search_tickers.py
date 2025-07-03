@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from external.clients.polygon_client import PolygonClient
+from src.external.clients.polygon_client import PolygonClient
 
 search_tickers_bp = Blueprint('search_tickers', __name__, url_prefix='/api/search_tickers')
 polygon_client = PolygonClient()

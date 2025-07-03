@@ -59,6 +59,7 @@ set IP=%IP:~1%
 :: Set environment variables
 set FLASK_APP=src/app.py
 set FLASK_ENV=development
+set PYTHONPATH=%CD%
 
 :: Print server information
 echo Starting Flask server...
@@ -67,4 +68,4 @@ echo Network URL: http://%IP%:%PORT%
 echo Press Ctrl+C to stop the server
 
 :: Start the server
-poetry run python src/app.py
+poetry run python app.py
