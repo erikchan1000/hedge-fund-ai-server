@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "hedge-fund-ai": {
+      "command": "node",
+      "args": ["/Users/erikchan-personal/Documents/code/hedge-fund-ai-server/mcp/dist/index.js"],
+      "env": {
+        "NODE_ENV": "production",
+        "LOG_LEVEL": "info"
+      },
+      "disabled": false,
+      "alwaysAllow": ["generate_analysis", "search_tickers", "get_health", "get_system_status", "get_available_analysts"]
+    }
+  },
+  "globalShortcut": "CommandOrControl+Shift+.",
+  "allowedCommands": ["node"]
+}
