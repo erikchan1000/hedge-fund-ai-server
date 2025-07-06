@@ -4,6 +4,7 @@ from src.services.analysis_service import AnalysisService
 from src.models.dto.requests import AnalysisRequestDTO
 from src.core.exceptions import ValidationError, BusinessLogicError
 from src.utils.validators import validate_analysis_request
+from src.utils.cancellation import cancellable_request, CancellationException
 import logging
 import json
 from datetime import datetime
@@ -31,27 +32,38 @@ class AnalysisController:
             
             def generate():
                 try:
-                    initial_progress = {
-                        "type": "progress",
-                        "stage": "initialization",
-                        "message": "Starting analysis...",
-                        "progress": 0,
+                    # Use cancellable request context
+                    with cancellable_request() as cancellation_token:
+                        initial_progress = {
+                            "type": "progress",
+                            "stage": "initialization",
+                            "message": "Starting analysis...",
+                            "progress": 0,
+                            "timestamp": datetime.now().isoformat(),
+                            "request_id": cancellation_token.request_id
+                        }
+                        print(f"initial_progress: {initial_progress}")
+                        yield f"data: {json.dumps(initial_progress)}\n\n".encode('utf-8')
+                        
+                        # Get the analysis stream with cancellation token
+                        response_stream = self.analysis_service.process_analysis_request(request_dto, cancellation_token)
+                        
+                        # Yield each chunk immediately in SSE format
+                        for chunk in response_stream:
+                            if isinstance(chunk, str):
+                                # Convert JSON string to SSE format
+                                yield f"data: {chunk.strip()}\n\n".encode('utf-8')
+                            else:
+                                yield f"data: {str(chunk).strip()}\n\n".encode('utf-8')
+                        
+                except CancellationException as e:
+                    logger.info(f"Analysis request was cancelled: {str(e)}")
+                    cancellation_event = {
+                        "type": "cancelled",
+                        "message": "Analysis was cancelled",
                         "timestamp": datetime.now().isoformat()
                     }
-                    print(f"initial_progress: {initial_progress}")
-                    yield f"data: {json.dumps(initial_progress)}\n\n".encode('utf-8')
-                    
-                    # Get the analysis stream
-                    response_stream = self.analysis_service.process_analysis_request(request_dto)
-                    
-                    # Yield each chunk immediately in SSE format
-                    for chunk in response_stream:
-                        if isinstance(chunk, str):
-                            # Convert JSON string to SSE format
-                            yield f"data: {chunk.strip()}\n\n".encode('utf-8')
-                        else:
-                            yield f"data: {str(chunk).strip()}\n\n".encode('utf-8')
-                        
+                    yield f"data: {json.dumps(cancellation_event)}\n\n".encode('utf-8')
                 except Exception as e:
                     logger.error(f"Error in streaming: {str(e)}")
                     error_event = {

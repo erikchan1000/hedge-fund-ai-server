@@ -1,4 +1,4 @@
-from typing import Dict, Any, List, Generator
+from typing import Dict, Any, List, Generator, Optional
 import json
 import logging
 from datetime import datetime
@@ -10,6 +10,7 @@ from src.strategies.risk.risk_manager import risk_management_agent
 from src.strategies.portfolio.portfolio_manager import portfolio_management_agent
 from src.core.exceptions import BusinessLogicError
 from src.utils.analysts import get_analyst_nodes
+from src.utils.cancellation import CancellationToken, CancellationException, cancellable_request
 from src.graph.state import AgentState
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,8 @@ class WorkflowService:
         selected_analysts: List[str],
         show_reasoning: bool = False,
         model_name: str = "gpt-4o",
-        model_provider: str = "OpenAI"
+        model_provider: str = "OpenAI",
+        cancellation_token: Optional[CancellationToken] = None
     ) -> Generator[str, None, None]:
         """Execute the complete analysis workflow."""
         
@@ -42,6 +44,10 @@ class WorkflowService:
         yield json.dumps(debug_event) + "\n"
         
         try:
+            # Check for cancellation at the start
+            if cancellation_token:
+                cancellation_token.check_cancelled()
+            
             # Create or get compiled workflow
             workflow_key = "_".join(sorted(selected_analysts))
             if workflow_key not in self._compiled_workflows:
@@ -50,15 +56,29 @@ class WorkflowService:
             
             agent = self._compiled_workflows[workflow_key]
             
+            # Check for cancellation after workflow creation
+            if cancellation_token:
+                cancellation_token.check_cancelled()
+            
             # Initialize state
             state = self._create_initial_state(
                 tickers, portfolio, start_date, end_date,
-                show_reasoning, model_name, model_provider
+                show_reasoning, model_name, model_provider, cancellation_token
             )
             
             # Execute workflow with progress tracking
-            yield from self._execute_with_progress(agent, state, selected_analysts)
+            yield from self._execute_with_progress(agent, state, selected_analysts, cancellation_token)
             
+        except CancellationException as e:
+            logger.info(f"Workflow execution was cancelled: {str(e)}")
+            # Yield cancellation event
+            cancellation_event = {
+                "type": "cancelled",
+                "message": "Analysis was cancelled",
+                "timestamp": datetime.now().isoformat()
+            }
+            yield json.dumps(cancellation_event) + "\n"
+            raise
         except Exception as e:
             logger.error(f"Error in workflow execution: {str(e)}", exc_info=True)
             raise BusinessLogicError(f"Workflow execution failed: {str(e)}")
@@ -102,10 +122,11 @@ class WorkflowService:
         end_date: str,
         show_reasoning: bool,
         model_name: str,
-        model_provider: str
+        model_provider: str,
+        cancellation_token: Optional[CancellationToken] = None
     ) -> Dict[str, Any]:
         """Create initial state for workflow execution."""
-        return {
+        state = {
             "messages": [
                 HumanMessage(
                     content="Make trading decisions based on the provided data."
@@ -124,12 +145,19 @@ class WorkflowService:
                 "model_provider": model_provider,
             },
         }
+        
+        # Add cancellation token to state if provided
+        if cancellation_token:
+            state["cancellation_token"] = cancellation_token
+        
+        return state
     
     def _execute_with_progress(
         self,
         agent,
         state: Dict[str, Any],
-        selected_analysts: List[str]
+        selected_analysts: List[str],
+        cancellation_token: Optional[CancellationToken] = None
     ) -> Generator[str, None, None]:
         """Execute workflow with progress updates using LangGraph's streaming API."""
         
@@ -153,6 +181,10 @@ class WorkflowService:
             
             # Use LangGraph's stream method with "custom" stream_mode to get custom progress updates
             for step in agent.stream(state, stream_mode="custom"):
+                # Check for cancellation before processing each step
+                if cancellation_token:
+                    cancellation_token.check_cancelled()
+                
                 current_step += 1
                 progress_percent = int(10 + (current_step * 80 / total_steps))
                 
@@ -207,6 +239,10 @@ class WorkflowService:
                     
                     yield json.dumps(progress_event) + "\n"
             
+            # Check for cancellation before completion
+            if cancellation_token:
+                cancellation_token.check_cancelled()
+            
             # Yield completion
             completion_event = {
                 "type": "progress",
@@ -216,6 +252,10 @@ class WorkflowService:
                 "timestamp": datetime.now().isoformat()
             }
             yield json.dumps(completion_event) + "\n"
+            
+            # Check for cancellation before final invoke
+            if cancellation_token:
+                cancellation_token.check_cancelled()
             
             # Get the final results using invoke
             final_state = agent.invoke(state)
@@ -232,6 +272,10 @@ class WorkflowService:
             }
             yield json.dumps(result_event) + "\n"
             
+        except CancellationException as e:
+            logger.info(f"Workflow execution was cancelled: {str(e)}")
+            # Don't yield another cancellation event here as it's already done in the parent method
+            raise
         except Exception as e:
             logger.error(f"Error in workflow execution: {str(e)}")
             error_event = {

@@ -1,4 +1,4 @@
-import axios, { AxiosInstance } from "axios";
+import axios, { AxiosInstance, AxiosRequestConfig } from "axios";
 import {
   AnalysisRequest,
   AnalysisResponse,
@@ -12,9 +12,52 @@ import {
   PortfolioStatusSchema,
 } from "./types.js";
 
+// MCP-compliant cancellation token interface
+interface CancellationToken {
+  isCancelled: boolean;
+  requestId?: string;
+  cancel(): void;
+  onCancellation(callback: () => void): void;
+}
+
+// MCP-compliant cancellation token implementation
+class MCPCancellationToken implements CancellationToken {
+  private _isCancelled = false;
+  private _callbacks: (() => void)[] = [];
+  
+  constructor(public requestId?: string) {}
+
+  get isCancelled(): boolean {
+    return this._isCancelled;
+  }
+
+  cancel(): void {
+    if (!this._isCancelled) {
+      this._isCancelled = true;
+      this._callbacks.forEach(callback => {
+        try {
+          callback();
+        } catch (error) {
+          console.error('Error in cancellation callback:', error);
+        }
+      });
+      this._callbacks = [];
+    }
+  }
+
+  onCancellation(callback: () => void): void {
+    if (this._isCancelled) {
+      callback();
+    } else {
+      this._callbacks.push(callback);
+    }
+  }
+}
+
 export class HedgeFundAIClient {
   private client: AxiosInstance;
   private baseURL: string;
+  private activeCancellationTokens: Map<string, CancellationToken> = new Map();
 
   constructor(baseURL: string = "http://localhost:5000") {
     this.baseURL = baseURL;
@@ -29,23 +72,97 @@ export class HedgeFundAIClient {
   }
 
   /**
-   * Generate hedge fund analysis
+   * Send MCP CancelledNotification according to specification
+   */
+  async sendCancelledNotification(requestId: string, reason?: string): Promise<void> {
+    try {
+      // According to MCP spec, we should send notifications/cancelled
+      const notification = {
+        jsonrpc: "2.0",
+        method: "notifications/cancelled",
+        params: {
+          requestId,
+          reason: reason || "Client requested cancellation"
+        }
+      };
+
+      // Send notification to the server
+      await this.client.post("/api/mcp/notification", notification);
+      
+      // Cancel the local token if it exists
+      const token = this.activeCancellationTokens.get(requestId);
+      if (token) {
+        token.cancel();
+        this.activeCancellationTokens.delete(requestId);
+      }
+    } catch (error) {
+      console.error(`Failed to send cancellation notification for request ${requestId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Create a new cancellation token
+   */
+  createCancellationToken(requestId?: string): CancellationToken {
+    const id = requestId || `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const token = new MCPCancellationToken(id);
+    this.activeCancellationTokens.set(id, token);
+    return token;
+  }
+
+  /**
+   * Cancel a request by ID
+   */
+  async cancelRequest(requestId: string, reason?: string): Promise<void> {
+    await this.sendCancelledNotification(requestId, reason);
+  }
+
+  /**
+   * Generate hedge fund analysis with MCP-compliant cancellation support
    */
   async generateAnalysis(
     request: AnalysisRequest,
+    cancellationToken?: CancellationToken
   ): Promise<AsyncGenerator<AnalysisResponse, void, unknown>> {
     // Validate request
     AnalysisRequestSchema.parse(request);
 
-    const response = await this.client.post("/api/analysis/generate", request, {
+    // Create cancellation token if not provided
+    const token = cancellationToken || this.createCancellationToken();
+
+    // Create abort controller for HTTP cancellation
+    const abortController = new AbortController();
+    
+    // Set up cancellation handling
+    token.onCancellation(() => {
+      abortController.abort();
+      // Send MCP cancellation notification if we have a request ID
+      if (token.requestId) {
+        this.sendCancelledNotification(token.requestId, "Client cancelled request").catch(console.error);
+      }
+    });
+
+    const config: AxiosRequestConfig = {
       responseType: "stream",
       headers: {
         Accept: "application/json",
         "Cache-Control": "no-cache",
+        // Include request ID in headers if available
+        ...(token.requestId && { 'X-Request-ID': token.requestId })
       },
-    });
+      signal: abortController.signal,
+    };
 
-    return this.parseStreamResponse(response.data);
+    try {
+      const response = await this.client.post("/api/analysis/generate", request, config);
+      return this.parseStreamResponse(response.data, token);
+    } catch (error) {
+      if (abortController.signal.aborted) {
+        throw new Error("Request was cancelled");
+      }
+      throw error;
+    }
   }
 
   /**
@@ -101,40 +218,102 @@ export class HedgeFundAIClient {
   }
 
   /**
-   * Parse streaming response from the analysis endpoint
+   * Parse streaming response with MCP-compliant cancellation support
    */
   private async *parseStreamResponse(
     stream: any,
+    cancellationToken?: CancellationToken
   ): AsyncGenerator<AnalysisResponse, void, unknown> {
     const decoder = new TextDecoder();
     let buffer = "";
 
-    for await (const chunk of stream) {
-      buffer += decoder.decode(chunk, { stream: true });
+    try {
+      for await (const chunk of stream) {
+        // Check for cancellation according to MCP spec
+        if (cancellationToken?.isCancelled) {
+          throw new Error("Request was cancelled");
+        }
 
-      // Split by newlines to get individual JSON objects
-      const lines = buffer.split("\n");
-      buffer = lines.pop() || ""; // Keep incomplete line in buffer
+        buffer += decoder.decode(chunk, { stream: true });
 
-      for (const line of lines) {
-        if (line.trim()) {
-          try {
-            const data = JSON.parse(line);
-            yield data as AnalysisResponse;
-          } catch (error) {
-            console.warn("Failed to parse JSON from stream:", line, error);
+        // Split by newlines to get individual JSON objects
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || ""; // Keep incomplete line in buffer
+
+        for (const line of lines) {
+          if (line.trim()) {
+            // Check for cancellation before processing each line
+            if (cancellationToken?.isCancelled) {
+              throw new Error("Request was cancelled");
+            }
+
+            try {
+              // Handle Server-Sent Events format
+              let jsonData = line;
+              if (line.startsWith("data: ")) {
+                jsonData = line.substring(6);
+              }
+              
+              if (jsonData.trim()) {
+                const data = JSON.parse(jsonData);
+                
+                // Check if this is a cancellation event from the server
+                if (data.type === "cancelled") {
+                  if (cancellationToken?.requestId) {
+                    cancellationToken.cancel();
+                  }
+                  throw new Error("Request was cancelled by server");
+                }
+                
+                yield data as AnalysisResponse;
+              }
+            } catch (error) {
+              if (error instanceof Error && error.message.includes("cancelled")) {
+                throw error;
+              }
+              console.warn("Failed to parse JSON from stream:", line, error);
+            }
           }
         }
       }
-    }
 
-    // Process any remaining data in buffer
-    if (buffer.trim()) {
-      try {
-        const data = JSON.parse(buffer);
-        yield data as AnalysisResponse;
-      } catch (error) {
-        console.warn("Failed to parse final JSON from stream:", buffer, error);
+      // Process any remaining data in buffer
+      if (buffer.trim() && !cancellationToken?.isCancelled) {
+        try {
+          let jsonData = buffer;
+          if (buffer.startsWith("data: ")) {
+            jsonData = buffer.substring(6);
+          }
+          
+          if (jsonData.trim()) {
+            const data = JSON.parse(jsonData);
+            
+            // Check if this is a cancellation event from the server
+            if (data.type === "cancelled") {
+              if (cancellationToken?.requestId) {
+                cancellationToken.cancel();
+              }
+              throw new Error("Request was cancelled by server");
+            }
+            
+            yield data as AnalysisResponse;
+          }
+        } catch (error) {
+          if (error instanceof Error && error.message.includes("cancelled")) {
+            throw error;
+          }
+          console.warn("Failed to parse final JSON from stream:", buffer, error);
+        }
+      }
+    } catch (error) {
+      if (cancellationToken?.isCancelled) {
+        throw new Error("Request was cancelled");
+      }
+      throw error;
+    } finally {
+      // Clean up the cancellation token
+      if (cancellationToken?.requestId) {
+        this.activeCancellationTokens.delete(cancellationToken.requestId);
       }
     }
   }
