@@ -113,10 +113,6 @@ Once connected, you can ask Claude:
    - Sign up: https://platform.openai.com/
    - Required for the analyst agents
 
-3. **Finnhub API Key** (Optional) - Additional financial data
-   - Sign up: https://finnhub.io/
-   - Free tier available
-
 ### Available MCP Tools
 
 #### 1. `generate_analysis`
