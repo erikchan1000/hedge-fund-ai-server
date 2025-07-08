@@ -5,8 +5,9 @@ import pandas as pd
 import numpy as np
 import json
 
-from src.external.clients.api import get_insider_trades, get_company_news
+from src.external.clients.api import get_company_news
 from src.utils.streaming import with_streaming_progress, emit_ticker_progress
+from src.data.models import SentimentType
 
 
 ##### Sentiment Agent #####
@@ -23,57 +24,44 @@ def sentiment_agent(state: AgentState):
     for ticker in tickers:
         progress.update_status("sentiment_agent", ticker, "Fetching insider trades")
 
-        # Get the insider trades
-        insider_trades = get_insider_trades(
-            ticker=ticker,
-            end_date=end_date,
-            limit=10,
-        )
+        # Insider trades functionality has been removed
 
         progress.update_status("sentiment_agent", ticker, "Analyzing trading patterns")
 
-        # Get the signals from the insider trades
-        transaction_shares = pd.Series([t.transaction_shares for t in insider_trades]).dropna()
-        insider_signals = np.where(transaction_shares < 0, "bearish", "bullish").tolist()
+        # Insider signals have been removed
 
         progress.update_status("sentiment_agent", ticker, "Fetching company news")
 
         # Get the company news
-        company_news = get_company_news(ticker, end_date, limit=100)
+        company_news = get_company_news(ticker, end_date, limit=10)
 
         # Get the sentiment from the company news
         sentiment = pd.Series([n.sentiment for n in company_news]).dropna()
-        news_signals = np.where(sentiment == "negative", "bearish", 
-                              np.where(sentiment == "positive", "bullish", "neutral")).tolist()
+        news_signals = np.where(sentiment == SentimentType.NEGATIVE, "bearish", 
+                              np.where(sentiment == SentimentType.POSITIVE, "bullish", "neutral")).tolist()
         
-        progress.update_status("sentiment_agent", ticker, "Combining signals")
-        # Combine signals from both sources with weights
-        insider_weight = 0.3
-        news_weight = 0.7
+        progress.update_status("sentiment_agent", ticker, "Analyzing news signals")
+        # Analyze news signals only
         
-        # Calculate weighted signal counts
-        bullish_signals = (
-            insider_signals.count("bullish") * insider_weight +
-            news_signals.count("bullish") * news_weight
-        )
-        bearish_signals = (
-            insider_signals.count("bearish") * insider_weight +
-            news_signals.count("bearish") * news_weight
-        )
-
-        if bullish_signals > bearish_signals:
+        # Count signal types
+        bullish_count = news_signals.count("bullish")
+        bearish_count = news_signals.count("bearish")
+        neutral_count = news_signals.count("neutral")
+        
+        total_signals = len(news_signals)
+        
+        if bullish_count > bearish_count:
             overall_signal = "bullish"
-        elif bearish_signals > bullish_signals:
+        elif bearish_count > bullish_count:
             overall_signal = "bearish"
         else:
             overall_signal = "neutral"
 
-        # Calculate confidence level based on the weighted proportion
-        total_weighted_signals = len(insider_signals) * insider_weight + len(news_signals) * news_weight
+        # Calculate confidence level based on signal dominance
         confidence = 0  # Default confidence when there are no signals
-        if total_weighted_signals > 0:
-            confidence = round(max(bullish_signals, bearish_signals) / total_weighted_signals, 2) * 100
-        reasoning = f"Weighted Bullish signals: {bullish_signals:.1f}, Weighted Bearish signals: {bearish_signals:.1f}"
+        if total_signals > 0:
+            confidence = round(max(bullish_count, bearish_count, neutral_count) / total_signals, 2) * 100
+        reasoning = f"News signals - Bullish: {bullish_count}, Bearish: {bearish_count}, Neutral: {neutral_count}"
 
         sentiment_analysis[ticker] = {
             "signal": overall_signal,

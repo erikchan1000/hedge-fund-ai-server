@@ -18,7 +18,6 @@ from src.external.clients.api import (
     get_price_data,
     get_prices,
     get_financial_metrics,
-    get_insider_trades,
 )
 from src.utils.display import print_backtest_results, format_backtest_row
 from typing_extensions import Callable
@@ -279,11 +278,10 @@ class Backtester:
             # Fetch financial metrics
             get_financial_metrics(ticker, self.end_date, limit=10)
 
-            # Fetch insider trades
-            get_insider_trades(ticker, self.end_date, start_date=self.start_date, limit=1000)
+            # Insider trades functionality has been removed
 
             # Fetch company news
-            get_company_news(ticker, self.end_date, start_date=self.start_date, limit=1000)
+            get_company_news(ticker, self.end_date, start_date=self.start_date, limit=10)
 
         print("Data pre-fetch complete.")
 

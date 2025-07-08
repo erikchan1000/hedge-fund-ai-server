@@ -3,7 +3,6 @@ from src.external.clients.api import (
     get_financial_metrics,
     get_market_cap,
     search_line_items,
-    get_insider_trades,
     get_company_news,
     get_prices,
 )
@@ -79,8 +78,7 @@ def stanley_druckenmiller_agent(state: AgentState):
         progress.update_status("stanley_druckenmiller_agent", ticker, "Getting market cap")
         market_cap = get_market_cap(ticker, end_date)
 
-        progress.update_status("stanley_druckenmiller_agent", ticker, "Fetching insider trades")
-        insider_trades = get_insider_trades(ticker, end_date, start_date=None, limit=50)
+        # Insider trades functionality has been removed
 
         progress.update_status("stanley_druckenmiller_agent", ticker, "Fetching company news")
         company_news = get_company_news(ticker, end_date, start_date=None, limit=50)
@@ -94,8 +92,7 @@ def stanley_druckenmiller_agent(state: AgentState):
         progress.update_status("stanley_druckenmiller_agent", ticker, "Analyzing sentiment")
         sentiment_analysis = analyze_sentiment(company_news)
 
-        progress.update_status("stanley_druckenmiller_agent", ticker, "Analyzing insider activity")
-        insider_activity = analyze_insider_activity(insider_trades)
+        # Insider activity analysis has been removed
 
         progress.update_status("stanley_druckenmiller_agent", ticker, "Analyzing risk-reward")
         risk_reward_analysis = analyze_risk_reward(financial_line_items, prices)
@@ -105,13 +102,12 @@ def stanley_druckenmiller_agent(state: AgentState):
 
         # Combine partial scores with weights typical for Druckenmiller:
         #   35% Growth/Momentum, 20% Risk/Reward, 20% Valuation,
-        #   15% Sentiment, 10% Insider Activity = 100%
+        #   25% Sentiment = 100%
         total_score = (
             growth_momentum_analysis["score"] * 0.35
             + risk_reward_analysis["score"] * 0.20
             + valuation_analysis["score"] * 0.20
-            + sentiment_analysis["score"] * 0.15
-            + insider_activity["score"] * 0.10
+            + sentiment_analysis["score"] * 0.25
         )
 
         max_possible_score = 10
@@ -130,7 +126,6 @@ def stanley_druckenmiller_agent(state: AgentState):
             "max_score": max_possible_score,
             "growth_momentum_analysis": growth_momentum_analysis,
             "sentiment_analysis": sentiment_analysis,
-            "insider_activity": insider_activity,
             "risk_reward_analysis": risk_reward_analysis,
             "valuation_analysis": valuation_analysis,
         }
@@ -264,51 +259,7 @@ def analyze_growth_and_momentum(financial_line_items: list, prices: list) -> dic
     return {"score": final_score, "details": "; ".join(details)}
 
 
-def analyze_insider_activity(insider_trades: list) -> dict:
-    """
-    Simple insider-trade analysis:
-      - If there's heavy insider buying, we nudge the score up.
-      - If there's mostly selling, we reduce it.
-      - Otherwise, neutral.
-    """
-    # Default is neutral (5/10).
-    score = 5
-    details = []
-
-    if not insider_trades:
-        details.append("No insider trades data; defaulting to neutral")
-        return {"score": score, "details": "; ".join(details)}
-
-    buys, sells = 0, 0
-    for trade in insider_trades:
-        # Use transaction_shares to determine if it's a buy or sell
-        # Negative shares = sell, positive shares = buy
-        if trade.transaction_shares is not None:
-            if trade.transaction_shares > 0:
-                buys += 1
-            elif trade.transaction_shares < 0:
-                sells += 1
-
-    total = buys + sells
-    if total == 0:
-        details.append("No buy/sell transactions found; neutral")
-        return {"score": score, "details": "; ".join(details)}
-
-    buy_ratio = buys / total
-    if buy_ratio > 0.7:
-        # Heavy buying => +3 points from the neutral 5 => 8
-        score = 8
-        details.append(f"Heavy insider buying: {buys} buys vs. {sells} sells")
-    elif buy_ratio > 0.4:
-        # Moderate buying => +1 => 6
-        score = 6
-        details.append(f"Moderate insider buying: {buys} buys vs. {sells} sells")
-    else:
-        # Low insider buying => -1 => 4
-        score = 4
-        details.append(f"Mostly insider selling: {buys} buys vs. {sells} sells")
-
-    return {"score": score, "details": "; ".join(details)}
+# Insider activity analysis has been removed
 
 
 def analyze_sentiment(news_items: list) -> dict:

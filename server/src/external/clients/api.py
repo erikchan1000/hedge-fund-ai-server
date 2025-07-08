@@ -13,6 +13,7 @@ from src.data.models import (
     InsiderTrade,
     LineItemName,
     FinancialPeriod,
+    SentimentType,
 )
 from src.external.clients.polygon_client import PolygonClient
 from src.external.clients.alpaca_client import AlpacaClient
@@ -197,59 +198,9 @@ def get_insider_trades(
     start_date: Optional[str] = None,
     limit: int = 1000,
 ) -> List[InsiderTrade]:
-    """Fetch insider trades from cache or FinnHub API."""
-    
-    if cached_data := _cache.get_insider_trades(ticker):
-        filtered_data = [InsiderTrade(**trade) for trade in cached_data
-                        if (start_date is None or trade["transaction_date"] >= start_date)
-                        and trade["transaction_date"] <= end_date]
-        filtered_data.sort(key=lambda x: x.transaction_date, reverse=True)
-        if filtered_data:
-            return filtered_data
-
-    try:
-        
-        data = polygon_client.get_insider_transactions(
-            ticker,
-            from_date=start_date,
-            to_date=end_date
-        )
-
-        
-        trades = []
-        for trade in data.get("data", []):
-            
-            transaction_type = "buy" if trade.get("change") > 0 else "sell"
-            shares = abs(trade.get("change", 0))
-            price_per_share = trade.get("price", 0)
-            total_value = shares * price_per_share
-
-            trades.append(InsiderTrade(
-                ticker=ticker,
-                issuer=ticker,  
-                name=trade.get("name", ""),
-                title=trade.get("title", ""),
-                is_board_director=None,  
-                transaction_date=trade.get("transactionDate", ""),
-                transaction_shares=shares,
-                transaction_price_per_share=price_per_share,
-                transaction_value=total_value,
-                shares_owned_before_transaction=None,  
-                shares_owned_after_transaction=None,  
-                security_title="Common Stock",  
-                filing_date=trade.get("filingDate", "")
-            ))
-
-        if not trades:
-            return []
-
-        
-        _cache.set_insider_trades(ticker, [trade.model_dump() for trade in trades])
-        return trades
-
-    except Exception as e:
-        logger.error(f"Error fetching insider trades for {ticker}: {str(e)}")
-        raise
+    """Insider trades are not supported in this implementation."""
+    logger.info(f"Insider trades functionality has been removed from the algorithm")
+    return []
 
 def get_company_news(
     ticker: str,
@@ -265,11 +216,11 @@ def get_company_news(
                         and news["date"] <= end_date]
         filtered_data.sort(key=lambda x: x.date, reverse=True)
         if filtered_data:
-            return filtered_data
+            return filtered_data[:limit]  # Apply limit to cached data too
 
     try:
         
-        data = polygon_client.get_company_news(ticker, start_date or "2024-01-01", end_date)
+        data = polygon_client.get_company_news(ticker, start_date or "2025-01-01", end_date, limit=limit)
 
         
         news_items = []
@@ -284,7 +235,7 @@ def get_company_news(
                 source=item.get("source", ""),
                 date=date,
                 url=item.get("url", ""),
-                sentiment=str(item.get("sentiment", 0))  
+                sentiment=item.get("sentiment", SentimentType.NEUTRAL)  # Now returns SentimentType enum
             ))
 
         if not news_items:

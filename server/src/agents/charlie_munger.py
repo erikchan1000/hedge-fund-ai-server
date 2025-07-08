@@ -1,5 +1,5 @@
 from src.graph.state import AgentState, show_agent_reasoning
-from src.external.clients.api import get_financial_metrics, get_market_cap, search_line_items, get_insider_trades, get_company_news
+from src.external.clients.api import get_financial_metrics, get_market_cap, search_line_items, get_company_news
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel
@@ -59,15 +59,7 @@ def charlie_munger_agent(state: AgentState):
         progress.update_status("charlie_munger_agent", ticker, "Getting market cap")
         market_cap = get_market_cap(ticker, end_date)
         
-        progress.update_status("charlie_munger_agent", ticker, "Fetching insider trades")
-        # Munger values management with skin in the game
-        insider_trades = get_insider_trades(
-            ticker,
-            end_date,
-            # Look back 2 years for insider trading patterns
-            start_date=None,
-            limit=100
-        )
+        # Insider trades functionality has been removed
         
         progress.update_status("charlie_munger_agent", ticker, "Fetching company news")
         # Munger avoids businesses with frequent negative press
@@ -76,14 +68,14 @@ def charlie_munger_agent(state: AgentState):
             end_date,
             # Look back 1 year for news
             start_date=None,
-            limit=100
+            limit=10
         )
         
         progress.update_status("charlie_munger_agent", ticker, "Analyzing moat strength")
         moat_analysis = analyze_moat_strength(metrics, financial_line_items)
         
         progress.update_status("charlie_munger_agent", ticker, "Analyzing management quality")
-        management_analysis = analyze_management_quality(financial_line_items, insider_trades)
+        management_analysis = analyze_management_quality(financial_line_items)
         
         progress.update_status("charlie_munger_agent", ticker, "Analyzing business predictability")
         predictability_analysis = analyze_predictability(financial_line_items)
@@ -263,7 +255,7 @@ def analyze_moat_strength(metrics: list, financial_line_items: list) -> dict:
     }
 
 
-def analyze_management_quality(financial_line_items: list, insider_trades: list) -> dict:
+def analyze_management_quality(financial_line_items: list) -> dict:
     """
     Evaluate management quality using Munger's criteria:
     - Capital allocation wisdom
@@ -366,33 +358,7 @@ def analyze_management_quality(financial_line_items: list, insider_trades: list)
     else:
         details.append("Insufficient cash or revenue data")
     
-    # 4. Insider activity - Munger values skin in the game
-    if insider_trades and len(insider_trades) > 0:
-        # Count buys vs. sells
-        buys = sum(1 for trade in insider_trades if hasattr(trade, 'transaction_type') and 
-                   trade.transaction_type and trade.transaction_type.lower() in ['buy', 'purchase'])
-        sells = sum(1 for trade in insider_trades if hasattr(trade, 'transaction_type') and 
-                    trade.transaction_type and trade.transaction_type.lower() in ['sell', 'sale'])
-        
-        # Calculate the buy ratio
-        total_trades = buys + sells
-        if total_trades > 0:
-            buy_ratio = buys / total_trades
-            if buy_ratio > 0.7:  # Strong insider buying
-                score += 2
-                details.append(f"Strong insider buying: {buys}/{total_trades} transactions are purchases")
-            elif buy_ratio > 0.4:  # Balanced insider activity
-                score += 1
-                details.append(f"Balanced insider trading: {buys}/{total_trades} transactions are purchases")
-            elif buy_ratio < 0.1 and sells > 5:  # Heavy selling
-                score -= 1  # Penalty for excessive selling
-                details.append(f"Concerning insider selling: {sells}/{total_trades} transactions are sales")
-            else:
-                details.append(f"Mixed insider activity: {buys}/{total_trades} transactions are purchases")
-        else:
-            details.append("No recorded insider transactions")
-    else:
-        details.append("No insider trading data available")
+    # 4. Insider activity analysis has been removed
     
     # 5. Consistency in share count - Munger prefers stable/decreasing shares
     share_counts = [item.outstanding_shares for item in financial_line_items
@@ -414,8 +380,8 @@ def analyze_management_quality(financial_line_items: list, insider_trades: list)
         details.append("Insufficient share count data")
     
     # Scale score to 0-10 range
-    # Maximum possible raw score would be 12 (3+3+2+2+2)
-    final_score = max(0, min(10, score * 10 / 12))
+    # Maximum possible raw score would be 10 (3+3+2+2)
+    final_score = max(0, min(10, score * 10 / 10))
     
     return {
         "score": final_score,

@@ -1,0 +1,41 @@
+service:
+  name: "sentiment-monitor"
+  log_level: "INFO"
+  environment: "production"
+  check_interval_minutes: 60
+
+api:
+  sentiment_url: "http://localhost:80/api/sentiment"
+  hedge_fund_url: "http://localhost:80/api"
+  timeout: 30
+
+alerts:
+  # Twilio settings - will be read from environment variables
+  cooldown_minutes: 120
+  sentiment_threshold_positive: 0.7
+  sentiment_threshold_negative: -0.7
+
+monitoring:
+  tickers:
+    - "AAPL"
+    - "GOOGL" 
+    - "MSFT"
+    - "TSLA"
+    - "AMZN"
+    - "NVDA"
+    - "META"
+    - "NFLX"
+
+database:
+  # Database URL will be read from environment variable DATABASE_URL
+  pool_size: 10
+  max_overflow: 20
+
+redis:
+  # Redis URL will be read from environment variable REDIS_URL
+  db: 0
+
+logging:
+  format: "{time:YYYY-MM-DD HH:mm:ss} | {level} | {name}:{function}:{line} | {message}"
+  rotation: "1 day"
+  retention: "30 days" 

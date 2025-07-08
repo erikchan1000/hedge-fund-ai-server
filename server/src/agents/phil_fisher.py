@@ -3,7 +3,6 @@ from src.external.clients.api import (
     get_financial_metrics,
     get_market_cap,
     search_line_items,
-    get_insider_trades,
     get_company_news,
 )
 from langchain_core.prompts import ChatPromptTemplate
@@ -80,7 +79,7 @@ def phil_fisher_agent(state: AgentState):
         market_cap = get_market_cap(ticker, end_date)
 
         progress.update_status("phil_fisher_agent", ticker, "Fetching insider trades")
-        insider_trades = get_insider_trades(ticker, end_date, start_date=None, limit=50)
+        # Insider trades functionality has been removed
 
         progress.update_status("phil_fisher_agent", ticker, "Fetching company news")
         company_news = get_company_news(ticker, end_date, start_date=None, limit=50)
@@ -98,7 +97,7 @@ def phil_fisher_agent(state: AgentState):
         fisher_valuation = analyze_fisher_valuation(financial_line_items, market_cap)
 
         progress.update_status("phil_fisher_agent", ticker, "Analyzing insider activity")
-        insider_activity = analyze_insider_activity(insider_trades)
+        # Insider activity analysis has been removed
 
         progress.update_status("phil_fisher_agent", ticker, "Analyzing sentiment")
         sentiment_analysis = analyze_sentiment(company_news)
@@ -108,15 +107,13 @@ def phil_fisher_agent(state: AgentState):
         #   25% Margins & Stability
         #   20% Management Efficiency
         #   15% Valuation
-        #   5% Insider Activity
-        #   5% Sentiment
+        #   10% Sentiment
         total_score = (
             growth_quality["score"] * 0.30
             + margins_stability["score"] * 0.25
             + mgmt_efficiency["score"] * 0.20
             + fisher_valuation["score"] * 0.15
-            + insider_activity["score"] * 0.05
-            + sentiment_analysis["score"] * 0.05
+            + sentiment_analysis["score"] * 0.10
         )
 
         max_possible_score = 10
@@ -137,7 +134,6 @@ def phil_fisher_agent(state: AgentState):
             "margins_stability": margins_stability,
             "management_efficiency": mgmt_efficiency,
             "valuation_analysis": fisher_valuation,
-            "insider_activity": insider_activity,
             "sentiment_analysis": sentiment_analysis,
         }
 
@@ -457,46 +453,7 @@ def analyze_fisher_valuation(financial_line_items: list, market_cap: float | Non
     return {"score": final_score, "details": "; ".join(details)}
 
 
-def analyze_insider_activity(insider_trades: list) -> dict:
-    """
-    Simple insider-trade analysis:
-      - If there's heavy insider buying, we nudge the score up.
-      - If there's mostly selling, we reduce it.
-      - Otherwise, neutral.
-    """
-    # Default is neutral (5/10).
-    score = 5
-    details = []
-
-    if not insider_trades:
-        details.append("No insider trades data; defaulting to neutral")
-        return {"score": score, "details": "; ".join(details)}
-
-    buys, sells = 0, 0
-    for trade in insider_trades:
-        if trade.transaction_shares is not None:
-            if trade.transaction_shares > 0:
-                buys += 1
-            elif trade.transaction_shares < 0:
-                sells += 1
-
-    total = buys + sells
-    if total == 0:
-        details.append("No buy/sell transactions found; neutral")
-        return {"score": score, "details": "; ".join(details)}
-
-    buy_ratio = buys / total
-    if buy_ratio > 0.7:
-        score = 8
-        details.append(f"Heavy insider buying: {buys} buys vs. {sells} sells")
-    elif buy_ratio > 0.4:
-        score = 6
-        details.append(f"Moderate insider buying: {buys} buys vs. {sells} sells")
-    else:
-        score = 4
-        details.append(f"Mostly insider selling: {buys} buys vs. {sells} sells")
-
-    return {"score": score, "details": "; ".join(details)}
+# Insider activity analysis has been removed
 
 
 def analyze_sentiment(news_items: list) -> dict:

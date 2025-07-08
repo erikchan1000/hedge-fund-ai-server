@@ -2,6 +2,13 @@ from pydantic import BaseModel
 from enum import Enum
 
 
+class SentimentType(str, Enum):
+    """Enum for news sentiment analysis"""
+    POSITIVE = "positive"
+    NEGATIVE = "negative"
+    NEUTRAL = "neutral"
+
+
 class Price(BaseModel):
     open: float
     close: float
@@ -107,7 +114,7 @@ class CompanyNews(BaseModel):
     source: str
     date: str
     url: str
-    sentiment: str | None = None
+    sentiment: SentimentType | None = None
 
 
 class CompanyNewsResponse(BaseModel):
