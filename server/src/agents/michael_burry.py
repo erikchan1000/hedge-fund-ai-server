@@ -12,7 +12,6 @@ from pydantic import BaseModel
 from src.external.clients.api import (
     get_company_news,
     get_financial_metrics,
-    get_insider_trades,
     get_market_cap,
     search_line_items,
 )
@@ -80,8 +79,7 @@ def michael_burry_agent(state: AgentState):  # noqa: C901  (complexity is fine h
             end_date,
         )
 
-        progress.update_status("michael_burry_agent", ticker, "Fetching insider trades")
-        insider_trades = get_insider_trades(ticker, end_date=end_date, start_date=start_date)
+        # Insider trades functionality has been removed
 
         progress.update_status("michael_burry_agent", ticker, "Fetching company news")
         news = get_company_news(ticker, end_date=end_date, start_date=start_date, limit=250)
@@ -98,8 +96,7 @@ def michael_burry_agent(state: AgentState):  # noqa: C901  (complexity is fine h
         progress.update_status("michael_burry_agent", ticker, "Analyzing balance sheet")
         balance_sheet_analysis = _analyze_balance_sheet(metrics, line_items)
 
-        progress.update_status("michael_burry_agent", ticker, "Analyzing insider activity")
-        insider_analysis = _analyze_insider_activity(insider_trades)
+        # Insider activity analysis has been removed
 
         progress.update_status("michael_burry_agent", ticker, "Analyzing contrarian sentiment")
         contrarian_analysis = _analyze_contrarian_sentiment(news)
@@ -110,13 +107,11 @@ def michael_burry_agent(state: AgentState):  # noqa: C901  (complexity is fine h
         total_score = (
             value_analysis["score"]
             + balance_sheet_analysis["score"]
-            + insider_analysis["score"]
             + contrarian_analysis["score"]
         )
         max_score = (
             value_analysis["max_score"]
             + balance_sheet_analysis["max_score"]
-            + insider_analysis["max_score"]
             + contrarian_analysis["max_score"]
         )
 
@@ -136,7 +131,6 @@ def michael_burry_agent(state: AgentState):  # noqa: C901  (complexity is fine h
             "max_score": max_score,
             "value_analysis": value_analysis,
             "balance_sheet_analysis": balance_sheet_analysis,
-            "insider_analysis": insider_analysis,
             "contrarian_analysis": contrarian_analysis,
             "market_cap": market_cap,
         }
@@ -269,29 +263,7 @@ def _analyze_balance_sheet(metrics, line_items):
     return {"score": score, "max_score": max_score, "details": "; ".join(details)}
 
 
-# ----- Insider activity -----------------------------------------------------
-
-def _analyze_insider_activity(insider_trades):
-    """Net insider buying over the last 12 months acts as a hard catalyst."""
-
-    max_score = 2
-    score = 0
-    details: list[str] = []
-
-    if not insider_trades:
-        details.append("No insider trade data")
-        return {"score": score, "max_score": max_score, "details": "; ".join(details)}
-
-    shares_bought = sum(t.transaction_shares or 0 for t in insider_trades if (t.transaction_shares or 0) > 0)
-    shares_sold = abs(sum(t.transaction_shares or 0 for t in insider_trades if (t.transaction_shares or 0) < 0))
-    net = shares_bought - shares_sold
-    if net > 0:
-        score += 2 if net / max(shares_sold, 1) > 1 else 1
-        details.append(f"Net insider buying of {net:,} shares")
-    else:
-        details.append("Net insider selling")
-
-    return {"score": score, "max_score": max_score, "details": "; ".join(details)}
+# ----- Insider activity functionality has been removed -----
 
 
 # ----- Contrarian sentiment -------------------------------------------------
@@ -342,17 +314,17 @@ def _generate_burry_output(
                 - Hunt for deep value in US equities using hard numbers (free cash flow, EV/EBIT, balance sheet)
                 - Be contrarian: hatred in the press can be your friend if fundamentals are solid
                 - Focus on downside first – avoid leveraged balance sheets
-                - Look for hard catalysts such as insider buying, buybacks, or asset sales
+                - Look for hard catalysts such as buybacks or asset sales
                 - Communicate in Burry's terse, data‑driven style
 
                 When providing your reasoning, be thorough and specific by:
                 1. Start with the key metric(s) that drove your decision
                 2. Cite concrete numbers (e.g. "FCF yield 14.7%", "EV/EBIT 5.3")
                 3. Highlight risk factors and why they are acceptable (or not)
-                4. Mention relevant insider activity or contrarian opportunities
+                4. Mention relevant contrarian opportunities
                 5. Use Burry's direct, number-focused communication style with minimal words
                 
-                For example, if bullish: "FCF yield 12.8%. EV/EBIT 6.2. Debt-to-equity 0.4. Net insider buying 25k shares. Market missing value due to overreaction to recent litigation. Strong buy."
+                For example, if bullish: "FCF yield 12.8%. EV/EBIT 6.2. Debt-to-equity 0.4. Market missing value due to overreaction to recent litigation. Strong buy."
                 For example, if bearish: "FCF yield only 2.1%. Debt-to-equity concerning at 2.3. Management diluting shareholders. Pass."
                 """,
             ),

@@ -1,10 +1,15 @@
 import os
 import time
 import logging
+from dateutil.parser import parse
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from polygon import RESTClient
+from src.utils.llm import APIRateLimiter
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage
+from src.data.models import SentimentType
 
 # Load environment variables
 load_dotenv()
@@ -12,6 +17,90 @@ load_dotenv()
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+def analyze_news_sentiment_batch(news_items: List[Dict[str, Any]], symbol: str) -> List[SentimentType]:
+    """
+    Analyze sentiment for a batch of news items using OpenAI.
+    Returns a list of SentimentType enum values: POSITIVE, NEGATIVE, or NEUTRAL
+    """
+    if not news_items:
+        return []
+    
+    try:
+        # Get OpenAI API key
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            logger.warning("OPENAI_API_KEY not found. Returning neutral sentiment for all news items.")
+            return [SentimentType.NEUTRAL] * len(news_items)
+        
+        # Initialize OpenAI client
+        llm = ChatOpenAI(
+            model="gpt-4o-mini",  # Using a cost-effective model for sentiment analysis
+            api_key=api_key,
+            temperature=0.1  # Low temperature for consistent sentiment classification
+        )
+        
+        # Rate limiter for OpenAI API calls
+        rate_limiter = APIRateLimiter("openai")
+        rate_limiter.wait_for_rate_limit()
+        
+        # Prepare batch prompt
+        news_text = ""
+        for i, item in enumerate(news_items):
+            headline = item.get('headline', '')
+            summary = item.get('summary', '')
+            news_text += f"{i+1}. Headline: {headline}\n"
+            if summary:
+                news_text += f"   Summary: {summary}\n"
+            news_text += "\n"
+        
+        prompt = f"""Analyze the sentiment of the following news articles about {symbol}. 
+For each article, determine if the sentiment is positive, negative, or neutral for the stock price.
+
+Consider:
+- Positive: Good earnings, partnerships, growth, upgrades, positive guidance
+- Negative: Losses, lawsuits, downgrades, regulatory issues, poor earnings
+- Neutral: General announcements, routine updates, mixed signals
+
+Return only a comma-separated list of sentiments (positive, negative, or neutral) for each article in order.
+
+News articles:
+{news_text}
+
+Response format: positive, negative, neutral, positive, ...
+"""
+        
+        # Make the API call
+        message = HumanMessage(content=prompt)
+        response = llm.invoke([message])
+        
+        # Parse the response
+        sentiment_text = response.content.strip()
+        sentiments = [s.strip().lower() for s in sentiment_text.split(',')]
+        
+        # Validate and clean the results
+        valid_sentiments = []
+        for sentiment in sentiments:
+            if sentiment == 'positive':
+                valid_sentiments.append(SentimentType.POSITIVE)
+            elif sentiment == 'negative':
+                valid_sentiments.append(SentimentType.NEGATIVE)
+            elif sentiment == 'neutral':
+                valid_sentiments.append(SentimentType.NEUTRAL)
+            else:
+                # Default to neutral for invalid responses
+                valid_sentiments.append(SentimentType.NEUTRAL)
+        
+        # Ensure we have the right number of sentiments
+        while len(valid_sentiments) < len(news_items):
+            valid_sentiments.append(SentimentType.NEUTRAL)
+        
+        return valid_sentiments[:len(news_items)]
+        
+    except Exception as e:
+        logger.error(f"Error analyzing sentiment for {symbol}: {str(e)}")
+        # Return neutral sentiment for all items on error
+        return [SentimentType.NEUTRAL] * len(news_items)
 
 class PolygonClient:
     def __init__(self):
@@ -418,78 +507,32 @@ class PolygonClient:
             return {"metric": {}, "series": {}}
     
     def get_insider_transactions(self, symbol: str, from_date: str = None, to_date: str = None) -> Dict[str, Any]:
-        """Get insider transactions - Note: Limited availability in Polygon.io API."""
-        self._wait_for_rate_limit()
-        
-        try:
-            # Note: Insider transactions may not be available in all Polygon.io plans
-            # This is a placeholder implementation
-            logger.warning(f"Insider transactions may not be available for {symbol} on your Polygon.io plan")
-            
-            try:
-                # Attempt to get insider transactions if available
-                insider_transactions = list(self.client.vx.list_insider_transactions(
-                    ticker=symbol,
-                    filing_date_gte=from_date,
-                    filing_date_lte=to_date,
-                    limit=10
-                ))
-                
-                # Convert to FinnHub format
-                transactions = []
-                for transaction in insider_transactions:
-                    # Handle dates safely
-                    transaction_date = getattr(transaction, 'transaction_date', '')
-                    filing_date = getattr(transaction, 'filing_date', '')
-                    
-                    if hasattr(transaction_date, 'strftime'):
-                        transaction_date_str = transaction_date.strftime("%Y-%m-%d")
-                    else:
-                        transaction_date_str = str(transaction_date)
-                    
-                    if hasattr(filing_date, 'strftime'):
-                        filing_date_str = filing_date.strftime("%Y-%m-%d")
-                    else:
-                        filing_date_str = str(filing_date)
-                    
-                    transactions.append({
-                        "symbol": symbol,
-                        "name": getattr(transaction, 'owner_name', ''),
-                        "title": getattr(transaction, 'owner_title', ''),
-                        "transactionDate": transaction_date_str,
-                        "transactionCode": getattr(transaction, 'transaction_code', ''),
-                        "transactionShares": getattr(transaction, 'transaction_shares', 0),
-                        "transactionPrice": getattr(transaction, 'transaction_price_per_share', 0),
-                        "change": getattr(transaction, 'transaction_shares', 0),
-                        "price": getattr(transaction, 'transaction_price_per_share', 0),
-                        "filingDate": filing_date_str
-                    })
-                
-                return {"data": transactions}
-                
-            except AttributeError:
-                # Method doesn't exist
-                logger.warning(f"Insider transactions endpoint not available in Polygon.io API")
-                return {"data": []}
-            
-        except Exception as e:
-            logger.error(f"Error getting insider transactions for {symbol}: {str(e)}")
-            return {"data": []}
+        """Insider transactions are not supported in this implementation."""
+        logger.info(f"Insider transactions functionality has been removed from the algorithm")
+        return {"data": []}
     
-    def get_company_news(self, symbol: str, start_date: str, end_date: str) -> List[Dict[str, Any]]:
+    def get_company_news(self, symbol: str, start_date: str, end_date: str, limit: int = 10) -> List[Dict[str, Any]]:
         """Get company news."""
         self._wait_for_rate_limit()
         
         try:
-            # Get news using correct method name
-            news_items = list(self.client.list_ticker_news(
+            # Get news using iterator but respect the limit parameter
+            news_iterator = self.client.list_ticker_news(
                 ticker=symbol,
                 published_utc_gte=start_date,
                 published_utc_lte=end_date,
-                limit=10
-            ))
+                order="desc",
+                limit=min(limit, 1000)  # Polygon API max limit per request
+            )
             
-            # Convert to FinnHub format
+            # Collect items until we reach the desired limit
+            news_items = []
+            for item in news_iterator:
+                news_items.append(item)
+                if len(news_items) >= limit:
+                    break
+            
+            # Convert to FinnHub format first (without sentiment)
             news = []
             for item in news_items:
                 # Handle publisher safely
@@ -501,7 +544,8 @@ class PolygonClient:
                 datetime_timestamp = 0
                 if hasattr(item, 'published_utc') and item.published_utc:
                     try:
-                        datetime_timestamp = int(item.published_utc.timestamp())
+                        dt = parse(item.published_utc)
+                        datetime_timestamp = int(dt.timestamp())
                     except:
                         datetime_timestamp = 0
                 
@@ -515,8 +559,18 @@ class PolygonClient:
                     "source": publisher_name,
                     "summary": getattr(item, 'description', ''),
                     "url": getattr(item, 'article_url', ''),
-                    "sentiment": 0  # Polygon doesn't provide sentiment
+                    "sentiment": SentimentType.NEUTRAL  # Default sentiment, will be updated below
                 })
+            
+            # Analyze sentiment for all news items in batch
+            if news:
+                logger.info(f"Analyzing sentiment for {len(news)} news items for {symbol}")
+                sentiments = analyze_news_sentiment_batch(news, symbol)
+                
+                # Update sentiment for each news item
+                for i, sentiment in enumerate(sentiments):
+                    if i < len(news):
+                        news[i]["sentiment"] = sentiment
             
             return news
             

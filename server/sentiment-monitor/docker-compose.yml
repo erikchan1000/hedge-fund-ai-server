@@ -1,0 +1,105 @@
+version: '3.8'
+
+services:
+  sentiment-monitor:
+    build: .
+    container_name: sentiment-monitor
+    ports:
+      - "8000:8000"
+    environment:
+      # Database Configuration
+      - DATABASE_URL=postgresql://sentiment_user:sentiment_pass@postgres:5432/sentiment_monitor
+      - REDIS_URL=redis://redis:6379/0
+      
+      # Twilio Configuration (set these via .env file)
+      - TWILIO_ACCOUNT_SID=${TWILIO_ACCOUNT_SID}
+      - TWILIO_AUTH_TOKEN=${TWILIO_AUTH_TOKEN}
+      - TWILIO_PHONE_NUMBER=${TWILIO_PHONE_NUMBER}
+      - ALERT_PHONE_NUMBERS=${ALERT_PHONE_NUMBERS}
+      
+      # Service Configuration
+      - PYTHONUNBUFFERED=1
+      - TZ=UTC
+    volumes:
+      - ./logs:/app/logs
+      - ./config.yml:/app/config.yml
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - sentiment-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: sentiment-postgres
+    environment:
+      - POSTGRES_DB=sentiment_monitor
+      - POSTGRES_USER=sentiment_user
+      - POSTGRES_PASSWORD=sentiment_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    networks:
+      - sentiment-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentiment_user -d sentiment_monitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: sentiment-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    networks:
+      - sentiment-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Optional: Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: sentiment-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - sentiment-monitor
+    restart: unless-stopped
+    networks:
+      - sentiment-network
+    profiles:
+      - production
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  sentiment-network:
+    driver: bridge 

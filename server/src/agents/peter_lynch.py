@@ -3,7 +3,6 @@ from src.external.clients.api import (
     get_financial_metrics,
     get_market_cap,
     search_line_items,
-    get_insider_trades,
     get_company_news,
     get_prices,
 )
@@ -80,8 +79,7 @@ def peter_lynch_agent(state: AgentState):
         progress.update_status("peter_lynch_agent", ticker, "Getting market cap")
         market_cap = get_market_cap(ticker, end_date)
 
-        progress.update_status("peter_lynch_agent", ticker, "Fetching insider trades")
-        insider_trades = get_insider_trades(ticker, end_date, start_date=None, limit=50)
+        # Insider trades functionality has been removed
 
         progress.update_status("peter_lynch_agent", ticker, "Fetching company news")
         company_news = get_company_news(ticker, end_date, start_date=None, limit=50)
@@ -102,18 +100,16 @@ def peter_lynch_agent(state: AgentState):
         progress.update_status("peter_lynch_agent", ticker, "Analyzing sentiment")
         sentiment_analysis = analyze_sentiment(company_news)
 
-        progress.update_status("peter_lynch_agent", ticker, "Analyzing insider activity")
-        insider_activity = analyze_insider_activity(insider_trades)
+        # Insider activity analysis has been removed
 
         # Combine partial scores with weights typical for Peter Lynch:
-        #   30% Growth, 25% Valuation, 20% Fundamentals,
-        #   15% Sentiment, 10% Insider Activity = 100%
+        #   30% Growth, 25% Valuation, 25% Fundamentals,
+        #   20% Sentiment = 100%
         total_score = (
             growth_analysis["score"] * 0.30
             + valuation_analysis["score"] * 0.25
-            + fundamentals_analysis["score"] * 0.20
-            + sentiment_analysis["score"] * 0.15
-            + insider_activity["score"] * 0.10
+            + fundamentals_analysis["score"] * 0.25
+            + sentiment_analysis["score"] * 0.20
         )
 
         max_possible_score = 10.0
@@ -134,7 +130,6 @@ def peter_lynch_agent(state: AgentState):
             "valuation_analysis": valuation_analysis,
             "fundamentals_analysis": fundamentals_analysis,
             "sentiment_analysis": sentiment_analysis,
-            "insider_activity": insider_activity,
         }
 
         progress.update_status("peter_lynch_agent", ticker, "Generating Peter Lynch analysis")
@@ -393,49 +388,7 @@ def analyze_sentiment(news_items: list) -> dict:
     return {"score": score, "details": "; ".join(details)}
 
 
-def analyze_insider_activity(insider_trades: list) -> dict:
-    """
-    Simple insider-trade analysis:
-      - If there's heavy insider buying, it's a positive sign.
-      - If there's mostly selling, it's a negative sign.
-      - Otherwise, neutral.
-    """
-    # Default 5 (neutral)
-    score = 5
-    details = []
-
-    if not insider_trades:
-        details.append("No insider trades data; defaulting to neutral")
-        return {"score": score, "details": "; ".join(details)}
-
-    buys, sells = 0, 0
-    for trade in insider_trades:
-        if trade.transaction_shares is not None:
-            if trade.transaction_shares > 0:
-                buys += 1
-            elif trade.transaction_shares < 0:
-                sells += 1
-
-    total = buys + sells
-    if total == 0:
-        details.append("No significant buy/sell transactions found; neutral stance")
-        return {"score": score, "details": "; ".join(details)}
-
-    buy_ratio = buys / total
-    if buy_ratio > 0.7:
-        # Heavy buying => +3 => total 8
-        score = 8
-        details.append(f"Heavy insider buying: {buys} buys vs. {sells} sells")
-    elif buy_ratio > 0.4:
-        # Some buying => +1 => total 6
-        score = 6
-        details.append(f"Moderate insider buying: {buys} buys vs. {sells} sells")
-    else:
-        # Mostly selling => -1 => total 4
-        score = 4
-        details.append(f"Mostly insider selling: {buys} buys vs. {sells} sells")
-
-    return {"score": score, "details": "; ".join(details)}
+# Insider activity analysis has been removed
 
 
 def generate_lynch_output(
